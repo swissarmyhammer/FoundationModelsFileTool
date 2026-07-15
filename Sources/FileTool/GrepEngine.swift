@@ -211,6 +211,10 @@ public struct GrepEngine: Sendable {
         let includesFiles: Bool
     }
 
+    /// The field selection carrying neither optional field, used by the `count`
+    /// mode and as the default for any mode absent from ``resultFieldsByMode``.
+    private static let noResultFields = ResultFields(includesMatches: false, includesFiles: false)
+
     /// The field selection for each output mode.
     ///
     /// The three modes differ only in which optional fields they populate:
@@ -224,7 +228,7 @@ public struct GrepEngine: Sendable {
     private static let resultFieldsByMode: [OutputMode: ResultFields] = [
         .content: ResultFields(includesMatches: true, includesFiles: false),
         .filesWithMatches: ResultFields(includesMatches: false, includesFiles: true),
-        .count: ResultFields(includesMatches: false, includesFiles: false)
+        .count: noResultFields
     ]
 
     /// The field selection for an output mode, defaulting to carrying no
@@ -233,7 +237,7 @@ public struct GrepEngine: Sendable {
     /// - Parameter mode: the resolved output mode.
     /// - Returns: the ``ResultFields`` selection for the mode.
     private static func resultFields(for mode: OutputMode) -> ResultFields {
-        resultFieldsByMode[mode, default: ResultFields(includesMatches: false, includesFiles: false)]
+        resultFieldsByMode[mode, default: noResultFields]
     }
 
     // MARK: File-type filter
