@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    # macOS 27 runner: the package targets `.macOS("27.0")` only —
+    # `FoundationModelsCodeContext` (the live edit-diagnostics dependency)
+    # declares macOS 27 as its floor and spawns `sourcekit-lsp` subprocesses, so
+    # the package cannot build or run on Linux or older macOS images.
+    runs-on: macos-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
