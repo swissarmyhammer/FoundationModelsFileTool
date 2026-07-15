@@ -145,6 +145,17 @@ extension ReadFile {
         case plain
     }
 
+    /// The mapping from an accepted ``format`` name to its resolved ``ReadFormat``.
+    ///
+    /// Format resolution is data, not control flow: this table is the single
+    /// place that enumerates the accepted names, so ``resolveFormat(_:)`` is one
+    /// lookup and the valid names in ``unknownFormatMessage`` cannot drift out of
+    /// step with what the operation actually accepts.
+    private static let formatMap: [String: ReadFormat] = [
+        hashlineFormatName: .hashline,
+        plainFormatName: .plain
+    ]
+
     // MARK: Execution
 
     /// Reads the file and returns the windowed content or a corrective message.
@@ -190,6 +201,24 @@ extension ReadFile {
 
     // MARK: Bound validation
 
+    /// A corrective message when `value` falls outside `min ... max`, or `nil` when acceptable.
+    ///
+    /// The single bound check behind ``offsetViolation(_:)`` and
+    /// ``limitViolation(_:)``: an absent value is acceptable (the parameter was
+    /// omitted), an in-range value is acceptable, and an out-of-range value
+    /// yields the supplied corrective `message` naming the valid range.
+    ///
+    /// - Parameters:
+    ///   - value: the requested value, or `nil` when the parameter was omitted.
+    ///   - min: the smallest acceptable value.
+    ///   - max: the largest acceptable value.
+    ///   - message: the corrective message returned when `value` is out of range.
+    /// - Returns: `message` when `value` is present and out of range, else `nil`.
+    private static func boundViolation(_ value: Int?, min: Int, max: Int, message: String) -> String? {
+        guard let value else { return nil }
+        return (min...max).contains(value) ? nil : message
+    }
+
     /// A corrective message when ``offset`` is out of bounds, or `nil` when acceptable.
     ///
     /// An absent offset is acceptable (the read starts at the first line).
@@ -197,8 +226,7 @@ extension ReadFile {
     /// - Parameter offset: the requested 1-based start line, or `nil`.
     /// - Returns: a corrective message naming the valid range, or `nil`.
     private static func offsetViolation(_ offset: Int?) -> String? {
-        guard let offset else { return nil }
-        return (minimumOffset...maximumOffset).contains(offset) ? nil : offsetBoundsMessage
+        boundViolation(offset, min: minimumOffset, max: maximumOffset, message: offsetBoundsMessage)
     }
 
     /// A corrective message when ``limit`` is out of bounds, or `nil` when acceptable.
@@ -208,25 +236,18 @@ extension ReadFile {
     /// - Parameter limit: the requested maximum line count, or `nil`.
     /// - Returns: a corrective message naming the valid range, or `nil`.
     private static func limitViolation(_ limit: Int?) -> String? {
-        guard let limit else { return nil }
-        return (minimumLimit...maximumLimit).contains(limit) ? nil : limitBoundsMessage
+        boundViolation(limit, min: minimumLimit, max: maximumLimit, message: limitBoundsMessage)
     }
 
     /// Resolves the requested format name to a ``ReadFormat``, or `nil` when unknown.
     ///
-    /// An absent name resolves to the default (`hashline`).
+    /// An absent name resolves to the default (`hashline`); any other name is
+    /// looked up in ``formatMap``, so the accepted set lives in exactly one place.
     ///
     /// - Parameter name: the requested format name, or `nil`.
     /// - Returns: the resolved format, or `nil` when the name is unrecognized.
     private static func resolveFormat(_ name: String?) -> ReadFormat? {
-        switch name ?? defaultFormatName {
-        case hashlineFormatName:
-            return .hashline
-        case plainFormatName:
-            return .plain
-        default:
-            return nil
-        }
+        formatMap[name ?? defaultFormatName]
     }
 
     // MARK: Windowing
@@ -253,7 +274,7 @@ extension ReadFile {
         limit: Int?,
         format: ReadFormat
     ) -> ReadResult {
-        let physicalLines = splitPhysicalLines(content)
+        let physicalLines = Hashline.splitLines(content)
         let total = physicalLines.count
         let startIndex = min(max((offset ?? 1) - 1, 0), total)
         let requestedCount = limit ?? (total - startIndex)
@@ -267,7 +288,7 @@ extension ReadFile {
         case .hashline:
             let windowContent = windowSlice.map { $0.text + $0.terminator }.joined()
             let tagged = Hashline.tag(lines: windowContent, startLine: startIndex + 1)
-            lines = splitPhysicalLines(tagged).map(\.text)
+            lines = Hashline.splitLines(tagged).map(\.text)
         }
 
         let note = windowNote(startIndex: startIndex, endIndex: endIndex, total: total)
@@ -291,76 +312,34 @@ extension ReadFile {
         return "\(windowNotePrefix)\(startIndex + 1)\(windowNoteRangeSeparator)\(endIndex)\(windowNoteTotalPrefix)\(total)"
     }
 
-    // MARK: Line splitting
-
-    /// A single physical line paired with its original terminator.
-    ///
-    /// `text` excludes the terminator; `terminator` is the sequence that
-    /// followed it (`\n`, `\r\n`, `\r`, or `""` for a final unterminated line).
-    private struct PhysicalLine {
-        /// The line text, excluding its terminator.
-        let text: String
-
-        /// The line's original terminator, or `""` for a final unterminated line.
-        let terminator: String
-    }
-
-    /// Split `content` into physical lines, preserving each line's terminator.
-    ///
-    /// Scans over Unicode scalars, breaking on `\n`, `\r\n`, and `\r`, mirroring
-    /// ``Hashline``'s line model so a window's line count and boundaries match
-    /// the anchors ``Hashline/tag(lines:startLine:)`` emits. Empty content yields
-    /// no lines; content ending in a terminator yields no phantom trailing line.
-    ///
-    /// - Parameter content: the text to split.
-    /// - Returns: the physical lines, in order.
-    private static func splitPhysicalLines(_ content: String) -> [PhysicalLine] {
-        var result: [PhysicalLine] = []
-        let scalars = content.unicodeScalars
-        let end = scalars.endIndex
-        var index = scalars.startIndex
-        var lineStart = index
-
-        func text(upTo boundary: String.UnicodeScalarView.Index) -> String {
-            String(String.UnicodeScalarView(scalars[lineStart..<boundary]))
-        }
-
-        while index < end {
-            let scalar = scalars[index]
-            if scalar == "\n" {
-                result.append(PhysicalLine(text: text(upTo: index), terminator: "\n"))
-                index = scalars.index(after: index)
-                lineStart = index
-            } else if scalar == "\r" {
-                let next = scalars.index(after: index)
-                if next < end, scalars[next] == "\n" {
-                    result.append(PhysicalLine(text: text(upTo: index), terminator: "\r\n"))
-                    index = scalars.index(after: next)
-                } else {
-                    result.append(PhysicalLine(text: text(upTo: index), terminator: "\r"))
-                    index = next
-                }
-                lineStart = index
-            } else {
-                index = scalars.index(after: index)
-            }
-        }
-        if lineStart < end {
-            result.append(PhysicalLine(text: text(upTo: end), terminator: ""))
-        }
-        return result
-    }
-
     // MARK: Corrective messages
+
+    /// The corrective message telling the model the valid range for a bounded parameter.
+    ///
+    /// The single message template behind ``offsetBoundsMessage`` and
+    /// ``limitBoundsMessage``: it names the offending parameter, describes the
+    /// kind of value it expects, and states the inclusive range, so the two
+    /// bound messages cannot drift apart in wording.
+    ///
+    /// - Parameters:
+    ///   - paramName: the parameter name, as it appears in backticks (`offset`).
+    ///   - typeDescription: the kind of value expected (for example
+    ///     `1-based line number`).
+    ///   - min: the smallest acceptable value.
+    ///   - max: the largest acceptable value.
+    /// - Returns: the corrective message naming the valid range.
+    private static func boundViolationMessage(paramName: String, typeDescription: String, min: Int, max: Int) -> String {
+        "The `\(paramName)` parameter must be a \(typeDescription) between \(min) and \(max)."
+    }
 
     /// The corrective message naming the valid ``offset`` range.
     private static var offsetBoundsMessage: String {
-        "The `offset` parameter must be a 1-based line number between \(minimumOffset) and \(maximumOffset)."
+        boundViolationMessage(paramName: "offset", typeDescription: "1-based line number", min: minimumOffset, max: maximumOffset)
     }
 
     /// The corrective message naming the valid ``limit`` range.
     private static var limitBoundsMessage: String {
-        "The `limit` parameter must be a line count between \(minimumLimit) and \(maximumLimit)."
+        boundViolationMessage(paramName: "limit", typeDescription: "line count", min: minimumLimit, max: maximumLimit)
     }
 
     /// The corrective message naming the valid ``format`` values.

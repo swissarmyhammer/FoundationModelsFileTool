@@ -238,25 +238,36 @@ public enum Hashline {
         return nearestText ?? nearestHash
     }
 
-    // MARK: Internals
+    // MARK: Line splitting
 
     /// A single line of content paired with its original terminator.
     ///
-    /// `text` excludes the terminator; `terminator` is the sequence that
-    /// followed it (`\n`, `\r\n`, `\r`, or `""` for a final unterminated line).
-    private struct Line {
-        let text: String
-        let terminator: String
+    /// The ``text`` excludes the terminator; the ``terminator`` is the sequence
+    /// that followed it (`\n`, `\r\n`, `\r`, or `""` for a final unterminated
+    /// line). Splitting and then concatenating `text + terminator` over every
+    /// line reproduces the original content exactly.
+    public struct Line {
+        /// The line text, excluding its terminator.
+        public let text: String
+
+        /// The line's original terminator, or `""` for a final unterminated line.
+        public let terminator: String
     }
 
-    /// Split `content` into lines preserving each line's original terminator.
+    /// Split `content` into physical lines, preserving each line's original terminator.
     ///
     /// Mirrors the Rust `split_lines`: scans over Unicode scalars (not
     /// graphemes, so `\r\n` is treated as two scalars — a bare `\r` and a `\n` —
     /// exactly as the Rust byte scan does, rather than as a single grapheme
     /// cluster). Empty content yields no lines; content ending in a terminator
-    /// yields no phantom trailing empty line.
-    private static func splitLines(_ content: String) -> [Line] {
+    /// yields no phantom trailing empty line. This is the single line model the
+    /// hashline anchors emitted by ``tag(lines:startLine:)`` are numbered
+    /// against, so windowing callers split with the same rule the anchors use.
+    ///
+    /// - Parameter content: the text to split into physical lines.
+    /// - Returns: the physical lines in order, each paired with its original
+    ///   terminator; empty for empty content.
+    public static func splitLines(_ content: String) -> [Line] {
         var result: [Line] = []
         let scalars = content.unicodeScalars
         let end = scalars.endIndex
@@ -292,6 +303,8 @@ public enum Hashline {
         }
         return result
     }
+
+    // MARK: Internals
 
     /// Trim leading and trailing horizontal whitespace (spaces and tabs), preserving interior content.
     ///
