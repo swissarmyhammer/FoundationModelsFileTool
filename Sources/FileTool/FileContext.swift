@@ -9,7 +9,11 @@ import Foundation
 ///   so ``FileContext`` can carry the lazily-created handle the file operations
 ///   will eventually consume, without pulling the diagnostics engine into this
 ///   task. Do not build real behavior on this type yet.
-public final class DiagnosticsBridge {
+///
+/// Conforms to `Sendable` trivially: the stub carries no stored state. The
+/// real bridge will preserve `Sendable` conformance, isolating any mutable
+/// engine state behind an actor or equivalent synchronization.
+public final class DiagnosticsBridge: Sendable {
     /// Creates the stub bridge.
     ///
     /// The real initializer will take the diagnostics-engine configuration; this
@@ -21,13 +25,22 @@ public final class DiagnosticsBridge {
 ///
 /// A `FileContext` bundles everything one agent session's file tools need: the
 /// session ``root`` directory, the ``pathGuard`` that validates every path
-/// against it, a ``readOnly`` flag, and a lazily-created ``diagnostics`` bridge
-/// handle. It is a reference type so the operations share one instance — and one
-/// lazily-started diagnostics bridge — for the life of the session.
+/// against it, a ``readOnly`` flag, and the ``diagnostics`` bridge handle. It is
+/// a reference type so the operations share one instance — and one diagnostics
+/// bridge — for the life of the session.
 ///
 /// The ``pathGuard`` enforces ``root`` as its workspace boundary, so every
 /// operation is confined to the session root by default.
-public final class FileContext {
+///
+/// - Note: The operations dispatch through the `Operations` runtime, whose
+///   `OperationDefinition` constrains its shared context to `Sendable`. Every
+///   stored property is immutable and `Sendable` (``root``, ``pathGuard``,
+///   ``readOnly``, and the ``diagnostics`` handle), so the type is a checked
+///   `Sendable`. The handle is held eagerly, not lazily: the deferral that
+///   matters — starting the (expensive) diagnostics engine only on the first
+///   diagnosable mutation — belongs inside the bridge, so holding a cheap
+///   handle eagerly keeps the shared context race-free.
+public final class FileContext: Sendable {
     /// The session working directory: the boundary and relative-path base.
     public let root: URL
 
@@ -43,12 +56,14 @@ public final class FileContext {
     /// itself is unaffected.
     public let readOnly: Bool
 
-    /// The lazily-created live edit-diagnostics bridge handle.
+    /// The live edit-diagnostics bridge handle.
     ///
     /// - Important: Currently a ``DiagnosticsBridge`` stub (see that type). The
-    ///   handle is created on first access so a session that never mutates a
-    ///   diagnosable file never starts the (eventual) diagnostics engine.
-    public lazy var diagnostics: DiagnosticsBridge = DiagnosticsBridge()
+    ///   handle is held eagerly and is cheap to create; the real bridge defers
+    ///   the expensive diagnostics-engine startup to the first diagnosable
+    ///   mutation internally, so a session that never mutates a diagnosable file
+    ///   never starts that engine.
+    public let diagnostics: DiagnosticsBridge
 
     /// Creates a session context rooted at a working directory.
     ///
@@ -62,5 +77,6 @@ public final class FileContext {
         self.root = root
         self.readOnly = readOnly
         self.pathGuard = PathGuard(root: root, workspaceRoot: root, allowSymlinks: allowSymlinks)
+        self.diagnostics = DiagnosticsBridge()
     }
 }

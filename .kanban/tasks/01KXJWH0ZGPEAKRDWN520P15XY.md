@@ -126,10 +126,14 @@ comments:
   id: 01kxkhnszewcw96c7g6k2rh1s9
   text: 'Iteration 6: both complexity findings fixed via comprehensive decomposition, strictly behavior-preserving. validatePath → short linear guard sequence over new private helpers: emptyViolation/blockedPatternViolation/controlCharacterViolation (static, return PathViolation?; reused existing lengthViolation for both length sites), symlinkBeforeCanonicalizationViolation, handleCanonicalizeResult + canonicalizeFailureViolation (errno ENOENT/EACCES/EINVAL/default switch moved into own helper), finishValidation (post-canon tail). checkPermission → thin 4-case switch → checkRead/Write/Edit/DirectoryPermission. Every helper private, low-complexity, fully DocC''d, no new dup literals. PRESERVED: check order (empty→raw len→blocked→resolve-session-root→resolved len→symlink-pre-canon→canon/errno→control chars→boundary→opted-in symlink re-resolve+boundary→URL), byte-identical messages (incl resolvedPath vs originalPath interpolation + ENOENT .map yielding uncanonicalized path), errno table, DOUBLE workspace-boundary check (count=2). double-check PASS (traced vs HEAD, no divergence). swift test --filter PathGuardTests 26/26; full 43 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T18:47:24.398317+00:00
+- actor: claude-code
+  id: 01kxkj1e3vtvr9evpxtj3vk1te
+  text: 'DONE. Iteration 6 re-review clean (0 findings, 14 checks). All 5 review-findings sections resolved. Task moved doing→review→done. Converged in 6 iterations (findings/round: 3→5→2→2→2→0; dimensions docs→dup→dup+docs→nesting→dup→complexity, each round distinct — guardrail never tripped). Decomposition introduced ZERO spillover on the ~10 new helpers. SECURITY LOGIC clean throughout (correctness/security validators raised 0 findings all rounds); all findings were quality dimensions. Verified-good local commit: 6cf0ec8 (green build+test, 26 PathGuardTests + full suite, behavior-preserving across all refactors). Not pushed. Checkpoint commits: c579f9b, 7e497f7, 89850f1, 119ba51, ee1c6ba, 6cf0ec8.'
+  timestamp: 2026-07-15T18:53:45.467215+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8380'
 title: PathGuard validation stack + FileContext
 ---
 ## What
