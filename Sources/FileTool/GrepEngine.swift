@@ -215,15 +215,26 @@ public struct GrepEngine: Sendable {
     ///
     /// The three modes differ only in which optional fields they populate:
     /// `content` carries ``GrepResult/matches``, `filesWithMatches` carries
-    /// ``GrepResult/files``, and `count` carries neither. Expressing that as this
-    /// table interpreted by the single ``makeResult(mode:matches:files:matchCount:elapsedMilliseconds:)``
-    /// code path keeps the selection data-driven rather than three parallel
-    /// switch arms a human must keep in lockstep.
+    /// ``GrepResult/files``, and `count` carries neither. Both the match-list
+    /// collection in ``search(candidates:regex:contextLines:mode:)`` and the
+    /// result shaping in ``makeResult(mode:matches:files:matchCount:elapsedMilliseconds:)``
+    /// interpret this one table via ``resultFields(for:)``, keeping the
+    /// selection data-driven and single-sourced rather than parallel branches a
+    /// human must keep in lockstep.
     private static let resultFieldsByMode: [OutputMode: ResultFields] = [
         .content: ResultFields(includesMatches: true, includesFiles: false),
         .filesWithMatches: ResultFields(includesMatches: false, includesFiles: true),
         .count: ResultFields(includesMatches: false, includesFiles: false)
     ]
+
+    /// The field selection for an output mode, defaulting to carrying no
+    /// optional fields for any mode absent from ``resultFieldsByMode``.
+    ///
+    /// - Parameter mode: the resolved output mode.
+    /// - Returns: the ``ResultFields`` selection for the mode.
+    private static func resultFields(for mode: OutputMode) -> ResultFields {
+        resultFieldsByMode[mode, default: ResultFields(includesMatches: false, includesFiles: false)]
+    }
 
     // MARK: File-type filter
 
@@ -378,7 +389,7 @@ public struct GrepEngine: Sendable {
             }
             matchedFiles.append(candidate.relativePath)
             matchCount += scan.matchLines.count
-            if mode == .content {
+            if resultFields(for: mode).includesMatches {
                 allMatches.append(
                     contentsOf: buildMatches(
                         file: candidate.relativePath,
@@ -414,7 +425,7 @@ public struct GrepEngine: Sendable {
         matchCount: Int,
         elapsedMilliseconds: Double
     ) -> GrepResult {
-        let fields = resultFieldsByMode[mode, default: ResultFields(includesMatches: false, includesFiles: false)]
+        let fields = resultFields(for: mode)
         return GrepResult(
             matches: fields.includesMatches ? matches : nil,
             files: fields.includesFiles ? files : nil,
