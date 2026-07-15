@@ -8,9 +8,6 @@ import Foundation
 /// model can read the message and correct the path within the same turn. The
 /// type conforms to `Error` only so it can be a `Result` failure — it is never
 /// thrown.
-///
-/// - Parameters:
-///   - message: the human-readable corrective message describing the violation.
 public struct PathViolation: Error, Equatable, Sendable, CustomStringConvertible {
     /// The corrective message describing why the path was rejected.
     public let message: String
@@ -205,10 +202,12 @@ public struct PathGuard: Sendable {
         // can never point outside the workspace. Mirrors the Rust
         // `resolve_symlink_securely`.
         if allowSymlinks && isSymlink(resolvedPath) {
-            guard case .resolved(let resolvedTarget) = Self.canonicalize(validatedPath) else {
-                return .failure(PathViolation("Failed to resolve symlink: \(resolvedPath)"))
+            switch Self.canonicalizeOrFail(validatedPath, failureMessage: "Failed to resolve symlink: \(resolvedPath)") {
+            case .success(let resolvedTarget):
+                validatedPath = resolvedTarget
+            case .failure(let violation):
+                return .failure(violation)
             }
-            validatedPath = resolvedTarget
             if let workspaceRoot {
                 if case .failure(let violation) = ensureWorkspaceBoundary(validatedPath, workspaceRoot: workspaceRoot) {
                     return .failure(violation)
@@ -323,16 +322,22 @@ public struct PathGuard: Sendable {
         _ path: String,
         workspaceRoot: URL
     ) -> Result<Void, PathViolation> {
-        guard case .resolved(let canonicalWorkspace) = Self.canonicalize(workspaceRoot.path) else {
-            return .failure(PathViolation("Invalid workspace root: \(workspaceRoot.path)"))
+        let canonicalWorkspace: String
+        switch Self.canonicalizeOrFail(workspaceRoot.path, failureMessage: "Invalid workspace root: \(workspaceRoot.path)") {
+        case .success(let canonical):
+            canonicalWorkspace = canonical
+        case .failure(let violation):
+            return .failure(violation)
         }
 
         let pathToCheck: String
         if fileExists(path) {
-            guard case .resolved(let canonical) = Self.canonicalize(path) else {
-                return .failure(PathViolation("Failed to canonicalize path: \(path)"))
+            switch Self.canonicalizeOrFail(path, failureMessage: "Failed to canonicalize path: \(path)") {
+            case .success(let canonical):
+                pathToCheck = canonical
+            case .failure(let violation):
+                return .failure(violation)
             }
-            pathToCheck = canonical
         } else {
             switch reconstructViaExistingParent(path) {
             case .success(let reconstructed):
@@ -361,8 +366,12 @@ public struct PathGuard: Sendable {
         var current = path
         while let parent = Self.parentPath(current) {
             if fileExists(parent) {
-                guard case .resolved(let canonicalParent) = Self.canonicalize(parent) else {
-                    return .failure(PathViolation("Failed to canonicalize parent directory: \(parent)"))
+                let canonicalParent: String
+                switch Self.canonicalizeOrFail(parent, failureMessage: "Failed to canonicalize parent directory: \(parent)") {
+                case .success(let canonical):
+                    canonicalParent = canonical
+                case .failure(let violation):
+                    return .failure(violation)
                 }
                 let remainder = Self.components(path).dropFirst(Self.components(parent).count)
                 let reconstructed =
@@ -424,6 +433,31 @@ public struct PathGuard: Sendable {
         }
         defer { free(resolved) }
         return .resolved(String(cString: resolved))
+    }
+
+    /// Canonicalize a path, mapping a `realpath` failure to a corrective violation.
+    ///
+    /// Wraps the ``CanonicalizeOutcome`` guard repeated at every workspace-boundary
+    /// and symlink-resolution site: on ``CanonicalizeOutcome/resolved(_:)`` it
+    /// yields the real absolute path; on ``CanonicalizeOutcome/failed(_:)`` it
+    /// discards the `errno` — as every call site already did — and returns a
+    /// `.failure` carrying `failureMessage`.
+    ///
+    /// - Parameters:
+    ///   - path: the path to canonicalize via `realpath`.
+    ///   - failureMessage: the corrective message when canonicalization fails.
+    /// - Returns: `.success` with the real absolute path, or `.failure` with a
+    ///   ``PathViolation`` carrying `failureMessage`.
+    private static func canonicalizeOrFail(
+        _ path: String,
+        failureMessage: @autoclosure () -> String
+    ) -> Result<String, PathViolation> {
+        switch canonicalize(path) {
+        case .resolved(let canonical):
+            return .success(canonical)
+        case .failed:
+            return .failure(PathViolation(failureMessage()))
+        }
     }
 
     /// A "path too long" violation when a path exceeds ``maximumPathLength``, else `nil`.
