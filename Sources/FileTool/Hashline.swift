@@ -1,9 +1,11 @@
 import CryptoKit
 import Foundation
 
-/// Pure, IO-free hashline anchor primitives — an algorithm-exact port of the
-/// Rust `swissarmyhammer-hashline` crate (plus the `md5`-based whole-file
-/// freshness token from `swissarmyhammer-tools`' `shared_utils::whole_file_hash`).
+/// Pure, IO-free hashline anchor primitives for line tagging and drift-tolerant resolution.
+///
+/// This is an algorithm-exact port of the Rust `swissarmyhammer-hashline` crate
+/// (plus the `md5`-based whole-file freshness token from `swissarmyhammer-tools`'
+/// `shared_utils::whole_file_hash`).
 ///
 /// A *hashline anchor* tags a line of text with its 1-based line number and a
 /// short content hash, rendered as `N:HH` (for example `42:a3`). `read file`
@@ -16,9 +18,10 @@ import Foundation
 /// ecosystem. Parity is pinned by golden vectors generated from the Rust crate
 /// (`Tests/FileToolTests/Fixtures/hashline-golden.json`).
 public enum Hashline {
-    /// How far from the exact line number proximity search looks for a drifted
-    /// anchor. The search expands symmetrically outward (`+1, -1, +2, -2, …`) up
-    /// to this many lines on each side. Matches the Rust `PROXIMITY_WINDOW`.
+    /// The maximum distance, in lines, that proximity search looks from the exact line for a drifted anchor.
+    ///
+    /// The search expands symmetrically outward (`+1, -1, +2, -2, …`) up to this
+    /// many lines on each side. Matches the Rust `PROXIMITY_WINDOW`.
     public static let proximityWindow = 50
 
     // MARK: Per-line hash
@@ -41,8 +44,9 @@ public enum Hashline {
         return UInt8(crc32(Array(trimmed.utf8)) & 0xff)
     }
 
-    /// Render a hash byte as two lowercase hexadecimal characters
-    /// (`0xa3` -> `"a3"`, `0x0f` -> `"0f"`).
+    /// Render a hash byte as two lowercase hexadecimal characters.
+    ///
+    /// For example, `0xa3` renders as `"a3"` and `0x0f` as `"0f"`.
     ///
     /// - Parameter hash: the hash byte to render.
     /// - Returns: two lowercase hexadecimal characters.
@@ -74,8 +78,7 @@ public enum Hashline {
 
     // MARK: Whole-file freshness token
 
-    /// Compute the whole-file freshness token: the lowercase-hex MD5 digest of
-    /// the full file bytes.
+    /// Compute the whole-file freshness token as the lowercase-hex MD5 digest of the full file bytes.
     ///
     /// This is the `#hash:` token the `read file` tool surfaces and the write /
     /// edit guards re-derive from on-disk bytes to detect whole-file staleness.
@@ -90,11 +93,17 @@ public enum Hashline {
 
     // MARK: Anchor parsing
 
-    /// Parse a hashline anchor `N:HH`, returning the 1-based line number and
-    /// hash.
+    /// The delimiter separating an anchor's `N:HH` head from its optional `|text` suffix.
     ///
-    /// An optional `|text` suffix is tolerated and ignored here (the caller uses
-    /// the text for verification or fallback; see ``resolveAnchor(_:in:)``).
+    /// Shared by ``parseAnchor(_:)`` and ``resolveAnchor(_:in:)`` so the dialect
+    /// is defined in one place.
+    private static let anchorTextDelimiter: Character = "|"
+
+    /// Parse a hashline anchor in the `N:HH` format.
+    ///
+    /// Returns the 1-based line number and hash. An optional `|text` suffix is
+    /// tolerated and ignored here (the caller uses the text for verification or
+    /// fallback; see ``resolveAnchor(_:in:)``).
     ///
     /// - Parameter anchorString: the anchor to parse, in the dialect `N:HH` with
     ///   an optional `|text` suffix.
@@ -106,7 +115,7 @@ public enum Hashline {
     public static func parseAnchor(_ anchorString: String) -> (line: Int, hash: UInt8)? {
         // Strip an optional `|text` suffix; the text is ignored here.
         let anchor: Substring =
-            anchorString.firstIndex(of: "|").map { anchorString[anchorString.startIndex..<$0] }
+            anchorString.firstIndex(of: anchorTextDelimiter).map { anchorString[anchorString.startIndex..<$0] }
             ?? Substring(anchorString)
         guard let colon = anchor.firstIndex(of: ":") else { return nil }
         let number = anchor[anchor.startIndex..<colon]
@@ -126,9 +135,10 @@ public enum Hashline {
 
     // MARK: Anchor resolution
 
-    /// Resolve a hashline anchor string against `content`, returning the
-    /// **1-based** line number whose content hashes to the anchor's hash,
-    /// tolerating small drift, or `nil` when the anchor is stale/unresolvable.
+    /// Resolve a hashline anchor string against `content`, tolerating small drift.
+    ///
+    /// Returns the **1-based** line number whose content hashes to the anchor's
+    /// hash, or `nil` when the anchor is stale/unresolvable.
     ///
     /// The `anchor` carries the dialect `N:HH` with an optional `|text` suffix;
     /// the suffix (when present) is used to verify/relocate — see
@@ -144,12 +154,13 @@ public enum Hashline {
     ///   when the anchor is malformed, stale, or unresolvable.
     public static func resolveAnchor(_ anchor: String, in content: String) -> Int? {
         guard let (line, hash) = parseAnchor(anchor) else { return nil }
-        let text: String? = anchor.firstIndex(of: "|").map { String(anchor[anchor.index(after: $0)...]) }
+        let text: String? = anchor.firstIndex(of: anchorTextDelimiter).map { String(anchor[anchor.index(after: $0)...]) }
         return resolveAnchorIn(content, line: line, hash: hash, text: text)
     }
 
-    /// Resolve a hashline anchor against `content`, returning the **1-based**
-    /// line number whose content hashes to `hash`, tolerating small drift.
+    /// Resolve a hashline anchor to a **1-based** line number, tolerating small drift.
+    ///
+    /// Returns the line number whose content hashes to `hash`.
     ///
     /// Resolution order:
     /// 1. The exact 1-based `line`, if its content hashes to `hash`.
@@ -181,9 +192,11 @@ public enum Hashline {
         return resolveIndex(lines, line: line, hash: hash, text: text).map { $0 + 1 }
     }
 
-    /// Resolve a hashline anchor to a **0-based** index into `lines` (the
-    /// per-line texts of the content, terminators excluded). Shared core for the
-    /// public resolution entry points; mirrors the Rust `resolve_index`.
+    /// Resolve a hashline anchor to a **0-based** index into `lines`.
+    ///
+    /// `lines` holds the per-line texts of the content (terminators excluded).
+    /// Shared core for the public resolution entry points; mirrors the Rust
+    /// `resolve_index`.
     private static func resolveIndex(_ lines: [String], line: Int, hash: UInt8, text: String?) -> Int? {
         func hashMatches(_ index: Int) -> Bool {
             index >= 0 && index < lines.count && hashLine(lines[index]) == hash
@@ -219,9 +232,10 @@ public enum Hashline {
 
     // MARK: Internals
 
-    /// A single line of content: its text (terminator excluded) and the original
-    /// terminator that followed it (`\n`, `\r\n`, `\r`, or `""` for a final
-    /// unterminated line).
+    /// A single line of content paired with its original terminator.
+    ///
+    /// `text` excludes the terminator; `terminator` is the sequence that
+    /// followed it (`\n`, `\r\n`, `\r`, or `""` for a final unterminated line).
     private struct Line {
         let text: String
         let terminator: String
@@ -271,8 +285,9 @@ public enum Hashline {
         return result
     }
 
-    /// Trim leading and trailing horizontal whitespace (spaces and tabs) from a
-    /// string, preserving interior content. Mirrors Rust's
+    /// Trim leading and trailing horizontal whitespace (spaces and tabs), preserving interior content.
+    ///
+    /// Mirrors Rust's
     /// `trim_matches([' ', '\t'])`, which trims per *scalar* (`char`), not per
     /// grapheme cluster — so a leading space immediately followed by a combining
     /// mark trims the space and keeps the bare mark. Scanning scalars keeps this
@@ -286,9 +301,17 @@ public enum Hashline {
         return out
     }
 
-    /// Standard IEEE CRC-32 (reflected, polynomial `0xEDB88320`, init/xorout
-    /// `0xFFFFFFFF`) — the algorithm `crc32fast` implements, so ``hashLine(_:)``
-    /// matches the Rust crate bit-for-bit.
+    /// The IEEE CRC-32 register initialization and final-XOR value.
+    ///
+    /// The reflected CRC-32 (`crc32fast`) both seeds the register with and XORs
+    /// the final result against this value.
+    private static let crc32XorOut: UInt32 = 0xFFFF_FFFF
+
+    /// The precomputed IEEE CRC-32 lookup table.
+    ///
+    /// Standard reflected CRC-32 (polynomial `0xEDB88320`, init/xorout
+    /// ``crc32XorOut``) — the algorithm `crc32fast` implements, so
+    /// ``hashLine(_:)`` matches the Rust crate bit-for-bit.
     private static let crc32Table: [UInt32] = (0..<256).map { index in
         var c = UInt32(index)
         for _ in 0..<8 {
@@ -298,11 +321,11 @@ public enum Hashline {
     }
 
     private static func crc32(_ bytes: [UInt8]) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
+        var crc = crc32XorOut
         for byte in bytes {
             let index = Int((crc ^ UInt32(byte)) & 0xff)
             crc = crc32Table[index] ^ (crc >> 8)
         }
-        return crc ^ 0xFFFF_FFFF
+        return crc ^ crc32XorOut
     }
 }
