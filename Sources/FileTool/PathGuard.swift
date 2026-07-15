@@ -98,6 +98,13 @@ public struct PathGuard: Sendable {
     /// a single place; the offending parent path is appended after one space.
     private static let parentDirectoryMissingMessage = "Parent directory does not exist:"
 
+    /// The corrective-message suffix telling the model how to supply a valid search root.
+    ///
+    /// Referenced by both branches of ``rejectFilesystemRoot(_:)`` so the exact
+    /// wording lives in a single place, appended after each branch-specific prefix.
+    private static let provideSessionDirectoryMessage =
+        "Provide a `path`, or run with a session working directory set."
+
     /// Creates a guard rooted at a session working directory.
     ///
     /// - Parameters:
@@ -284,7 +291,7 @@ public struct PathGuard: Sendable {
             return .failure(
                 PathViolation(
                     "Refusing to search '\(searchDirectory)': the session working directory could not be "
-                        + "resolved to an absolute path. Provide a `path`, or run with a session working directory set."
+                        + "resolved to an absolute path. " + Self.provideSessionDirectoryMessage
                 )
             )
         }
@@ -292,7 +299,7 @@ public struct PathGuard: Sendable {
             return .failure(
                 PathViolation(
                     "Refusing to search the filesystem root: \(searchDirectory). "
-                        + "Provide a `path`, or run with a session working directory set."
+                        + Self.provideSessionDirectoryMessage
                 )
             )
         }
