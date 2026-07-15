@@ -99,11 +99,15 @@ comments:
   id: 01kxkr02h6t7d79gqbqksnnbv6
   text: 'Iteration 5: finding fixed at root. unknownFormatMessage now derives valid-format list from formatMap.keys.sorted().joined(separator: ", ") — formatMap is single source of truth for both parsing and the error message; DocC updated. Byte-identical: "The `format` parameter must be one of: hashline, plain." (sorted() is load-bearing since Dictionary.keys is nondeterministic; h<p → "hashline, plain" unchanged). Sweep: no other hand-enumeration of format names (hashlineFormatName/plainFormatName now only in formatMap + defaultFormatName default, not an enumeration). double-check REVISE→hardened ReadFileTests unknownFormatIsCorrective from .contains to exact-string assertion so future byte-drift fails loudly. swift test --filter ReadFileTests 20/20, full 63 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T20:37:52.294018+00:00
+- actor: claude-code
+  id: 01kxkrawp42n405k31q42rx1ap
+  text: 'DONE. Iteration 5 re-review clean (full 14/0 pass, 0 findings). All 4 review-findings sections resolved. Task moved doing→review→done. Converged in 5 iterations (findings/round: 4→2→5→1→0; dimensions dup→dup(Hashline)→dup+naming+doc→data-source; offset/limit recurrence killed at root via BoundSpec in iter 4 and stayed fixed). Reused Hashline (splitLines/tag made public) + PathGuard; made FileContext Sendable (prereq for @Operation). Verified-good local commit: a6d2d51 (green build+test, golden vectors bit-exact, exact-message assertions). Not pushed. Checkpoint commits: c7793c7, b503439, 8ac05a3, 3884015, a6d2d51. Note: one reviewer crashed mid-write (API error) during iter-3 review; recovered by re-running the review to get a complete recorded verdict.'
+  timestamp: 2026-07-15T20:43:46.756076+00:00
 depends_on:
 - 01KXJWGS1DPP92870X79GPX96T
 - 01KXJWH0ZGPEAKRDWN520P15XY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8480'
 title: read file operation
 ---
 ## What

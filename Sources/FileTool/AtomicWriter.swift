@@ -1,0 +1,284 @@
+import Darwin
+import Foundation
+
+/// Writes file bytes atomically and owns the encoding and line-ending conventions the write and edit operations preserve.
+///
+/// The write path never mutates the target in place. It writes the new bytes to
+/// a sibling temporary file — `{path}.tmp.{UUID}` in the *same directory* as the
+/// target, so the final ``Foundation/FileManager``-free `rename` stays on one
+/// filesystem and is therefore atomic — and only then renames the temporary
+/// file onto the target, which atomically replaces any existing file. A single
+/// cleanup path removes the temporary file on *any* failure (a failed write, a
+/// failed permission re-application, or a failed rename), so an interrupted
+/// write can never leave a partial file or a stray temporary behind. When the
+/// target already exists, its permission bits are re-applied to the replacement
+/// so overwriting, for example, a `0755` script keeps it executable.
+///
+/// The type also owns the text conventions the operations must preserve across
+/// a rewrite: byte-order-mark-aware ``TextEncoding`` detection with a UTF-8
+/// fallback (``decode(_:)``), symmetric re-encoding (``encode(_:as:)``), and
+/// ``LineEnding`` detection (``detectLineEnding(in:)``). The `write file`
+/// operation writes freshly supplied UTF-8 content, so it uses only the write
+/// path; the `edit file` operation reads an existing file, detects its encoding
+/// and line ending, and re-encodes the edited text with the same convention, so
+/// it consumes the detection and re-encode hooks as well.
+public enum AtomicWriter {
+    // MARK: Temporary-file naming
+
+    /// The infix between the target path and the unique suffix of a temporary file name.
+    ///
+    /// A temporary file is named `{target path}\(temporaryFileInfix){UUID}`, so
+    /// it sits in the same directory as the target and a directory scan can
+    /// recognize a leftover by this infix.
+    private static let temporaryFileInfix = ".tmp."
+
+    // MARK: Write path
+
+    /// Write `data` to `url` atomically, creating parents and preserving permissions.
+    ///
+    /// Creates the target's parent directories if they do not exist, writes the
+    /// bytes to a sibling temporary file, re-applies the original file's
+    /// permission bits when overwriting, and renames the temporary file onto the
+    /// target. On any failure the temporary file is removed and the error is
+    /// rethrown, leaving the target untouched.
+    ///
+    /// - Parameters:
+    ///   - data: the bytes to write.
+    ///   - url: the destination file URL.
+    /// - Throws: an ``AtomicWriteError`` when the rename fails, or the
+    ///   underlying error when creating a directory or writing the bytes fails.
+    public static func write(_ data: Data, to url: URL) throws {
+        let originalPermissions = existingPermissionBits(of: url)
+        try createParentDirectory(of: url)
+        let temporaryURL = makeTemporaryURL(for: url)
+        do {
+            try data.write(to: temporaryURL)
+            if let originalPermissions {
+                try applyPermissionBits(originalPermissions, to: temporaryURL)
+            }
+            try rename(temporaryURL, onto: url)
+        } catch {
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
+    }
+
+    /// The sibling temporary-file URL for a target, in the target's own directory.
+    ///
+    /// - Parameter url: the destination file URL.
+    /// - Returns: a `{path}\(temporaryFileInfix){UUID}` URL in the same directory.
+    private static func makeTemporaryURL(for url: URL) -> URL {
+        URL(fileURLWithPath: url.path + temporaryFileInfix + UUID().uuidString)
+    }
+
+    /// Create the target's parent directory, including any missing intermediate directories.
+    ///
+    /// A no-op when the parent already exists. Extracted so the write path reads
+    /// as a single sequence of steps.
+    ///
+    /// - Parameter url: the destination file URL whose parent to create.
+    /// - Throws: the underlying error when the directory cannot be created.
+    private static func createParentDirectory(of url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+    }
+
+    /// Rename `source` onto `destination`, atomically replacing any existing file.
+    ///
+    /// Uses the POSIX `rename` so the replacement is atomic on a single
+    /// filesystem; a failure (for example, when `destination` is an existing
+    /// directory) is surfaced as an ``AtomicWriteError`` carrying the `errno`
+    /// description.
+    ///
+    /// - Parameters:
+    ///   - source: the temporary file to rename.
+    ///   - destination: the target to replace.
+    /// - Throws: an ``AtomicWriteError`` when the rename fails.
+    private static func rename(_ source: URL, onto destination: URL) throws {
+        let result = source.path.withCString { sourcePath in
+            destination.path.withCString { destinationPath in
+                Darwin.rename(sourcePath, destinationPath)
+            }
+        }
+        guard result == 0 else {
+            throw AtomicWriteError("could not replace \(destination.path): \(String(cString: strerror(errno)))")
+        }
+    }
+
+    // MARK: Permission preservation
+
+    /// The permission bits (`mode & 0o777`) of `url` when it already exists, else `nil`.
+    ///
+    /// - Parameter url: the file URL to inspect.
+    /// - Returns: the permission bits when the file exists and can be stat-ed,
+    ///   or `nil` when it does not exist (a fresh write, with nothing to preserve).
+    private static func existingPermissionBits(of url: URL) -> mode_t? {
+        var status = stat()
+        guard stat(url.path, &status) == 0 else { return nil }
+        return status.st_mode & permissionBitMask
+    }
+
+    /// Re-apply permission `bits` to `url`.
+    ///
+    /// - Parameters:
+    ///   - bits: the permission bits to set.
+    ///   - url: the file URL to change.
+    /// - Throws: an ``AtomicWriteError`` when `chmod` fails.
+    private static func applyPermissionBits(_ bits: mode_t, to url: URL) throws {
+        let result = url.path.withCString { chmod($0, bits) }
+        guard result == 0 else {
+            throw AtomicWriteError("could not re-apply permissions to \(url.path): \(String(cString: strerror(errno)))")
+        }
+    }
+
+    /// The mask selecting the user/group/other permission bits from a file mode.
+    private static let permissionBitMask: mode_t = 0o777
+
+    // MARK: Encoding detection and re-encode
+
+    /// A text encoding the operations detect and preserve across a rewrite.
+    ///
+    /// Limited to the byte-order-mark-aware UTF-8 forms the file operations
+    /// support; the raw name reads directly into an operation result's encoding
+    /// field.
+    public enum TextEncoding: String, Sendable {
+        /// UTF-8 with no byte-order mark.
+        case utf8 = "utf-8"
+
+        /// UTF-8 preceded by a byte-order mark.
+        case utf8WithByteOrderMark = "utf-8 bom"
+    }
+
+    /// Decoded text paired with the encoding it was decoded from.
+    ///
+    /// Re-encoding ``text`` with ``encoding`` via ``AtomicWriter/encode(_:as:)``
+    /// reproduces the original bytes, so an edit can preserve the file's
+    /// encoding without inspecting the raw bytes again.
+    public struct DecodedText: Sendable {
+        /// The detected encoding of the source bytes.
+        public let encoding: TextEncoding
+
+        /// The decoded text, with any byte-order mark stripped.
+        public let text: String
+
+        /// Creates a decoded-text pairing.
+        ///
+        /// - Parameters:
+        ///   - encoding: the detected encoding of the source bytes.
+        ///   - text: the decoded text, with any byte-order mark stripped.
+        public init(encoding: TextEncoding, text: String) {
+            self.encoding = encoding
+            self.text = text
+        }
+    }
+
+    /// The UTF-8 byte-order mark bytes (`EF BB BF`).
+    private static let utf8ByteOrderMark: [UInt8] = [0xEF, 0xBB, 0xBF]
+
+    /// Decode file bytes to text, detecting the encoding from a leading byte-order mark.
+    ///
+    /// Bytes beginning with the UTF-8 byte-order mark decode as
+    /// ``TextEncoding/utf8WithByteOrderMark`` with the mark stripped from the
+    /// returned text; all other bytes are decoded as plain
+    /// ``TextEncoding/utf8``. Bytes that are not valid UTF-8 (a binary file)
+    /// yield `nil` rather than a lossy decode.
+    ///
+    /// - Parameter data: the raw file bytes.
+    /// - Returns: the decoded text and its encoding, or `nil` when the bytes are
+    ///   not valid UTF-8.
+    public static func decode(_ data: Data) -> DecodedText? {
+        if data.starts(with: utf8ByteOrderMark) {
+            let body = data.dropFirst(utf8ByteOrderMark.count)
+            guard let text = String(data: body, encoding: .utf8) else { return nil }
+            return DecodedText(encoding: .utf8WithByteOrderMark, text: text)
+        }
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
+        return DecodedText(encoding: .utf8, text: text)
+    }
+
+    /// Encode `text` as `encoding`, re-applying a byte-order mark when required.
+    ///
+    /// The inverse of ``decode(_:)``: encoding decoded text with its detected
+    /// encoding reproduces the original bytes.
+    ///
+    /// - Parameters:
+    ///   - text: the text to encode.
+    ///   - encoding: the encoding to produce.
+    /// - Returns: the encoded bytes.
+    public static func encode(_ text: String, as encoding: TextEncoding) -> Data {
+        var data = Data()
+        if encoding == .utf8WithByteOrderMark {
+            data.append(contentsOf: utf8ByteOrderMark)
+        }
+        data.append(Data(text.utf8))
+        return data
+    }
+
+    // MARK: Line-ending detection
+
+    /// The line-ending convention of a text.
+    ///
+    /// The raw name reads directly into an operation result's line-ending field.
+    public enum LineEnding: String, Sendable {
+        /// Every line ends with a line feed (`\n`).
+        case lineFeed = "lf"
+
+        /// Every line ends with a carriage return then a line feed (`\r\n`).
+        case carriageReturnLineFeed = "crlf"
+
+        /// Every line ends with a bare carriage return (`\r`).
+        case carriageReturn = "cr"
+
+        /// Lines end with more than one distinct terminator.
+        case mixed = "mixed"
+    }
+
+    /// The terminator strings that map to each single-convention ``LineEnding``.
+    ///
+    /// Detection is data, not control flow: the set of distinct terminators is
+    /// looked up here, so recognizing a convention and reporting `mixed` share
+    /// one code path and cannot drift apart.
+    private static let lineEndingByTerminator: [String: LineEnding] = [
+        "\n": .lineFeed,
+        "\r\n": .carriageReturnLineFeed,
+        "\r": .carriageReturn,
+    ]
+
+    /// Detect the line-ending convention of `text`.
+    ///
+    /// Reuses ``Hashline/splitLines(_:)`` — the single line model the anchors
+    /// are numbered against — to collect the distinct terminators present. Text
+    /// with a single terminator kind reports that convention; text with more
+    /// than one reports ``LineEnding/mixed``; text with no line breaks reports
+    /// `nil`.
+    ///
+    /// - Parameter text: the text to inspect.
+    /// - Returns: the detected line ending, or `nil` when `text` has no line breaks.
+    public static func detectLineEnding(in text: String) -> LineEnding? {
+        var terminators: Set<String> = []
+        for line in Hashline.splitLines(text) where !line.terminator.isEmpty {
+            terminators.insert(line.terminator)
+        }
+        guard let onlyTerminator = terminators.first else { return nil }
+        return terminators.count == 1 ? lineEndingByTerminator[onlyTerminator] : .mixed
+    }
+}
+
+/// A failed atomic write, carrying a description of the underlying failure.
+///
+/// Thrown by ``AtomicWriter`` when a `rename` or `chmod` fails; the operations
+/// layer catches it and returns a corrective message rather than propagating a
+/// throw out of an operation's `execute(in:)`.
+public struct AtomicWriteError: Error, CustomStringConvertible {
+    /// The description of what failed.
+    public let description: String
+
+    /// Creates an atomic-write error.
+    ///
+    /// - Parameter description: the description of what failed.
+    public init(_ description: String) {
+        self.description = description
+    }
+}
