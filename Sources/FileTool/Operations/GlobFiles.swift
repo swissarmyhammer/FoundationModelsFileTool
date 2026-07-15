@@ -46,13 +46,12 @@ extension GlobFiles {
     /// which performs the validation, broad-pattern guard, path bounding, walk,
     /// matching, ordering, and capping. Every recoverable failure is returned as
     /// ``GlobOutput/corrective(_:)``; nothing here throws for a bad pattern, a
-    /// broad pattern, a bad path, or a missing directory. The `throws` is carried
-    /// only to satisfy the `OperationDefinition/execute(in:)` requirement, matching
-    /// the sibling ``ReadFile`` and ``WriteFile`` operations.
+    /// broad pattern, a bad path, or a missing directory.
     ///
     /// - Parameter context: the shared session context supplying the path guard and root.
     /// - Returns: the ``GlobOutput/content(_:)`` matches on success, or a
     ///   ``GlobOutput/corrective(_:)`` message the model can act on.
+    /// - Throws: Nothing; the signature carries `throws` to satisfy the `OperationDefinition` protocol requirement.
     public func execute(in context: FileContext) async throws -> GlobOutput {
         GlobEngine().run(
             pattern: pattern,

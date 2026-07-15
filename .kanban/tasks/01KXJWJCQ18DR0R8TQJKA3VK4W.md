@@ -54,6 +54,30 @@ comments:
 
     POTENTIAL CONTRADICTION FLAGGED (implementer re-ran validators, logged but did NOT apply): GlobResult.capped → isCapped boolean-naming suggestion. NOT applied because `capped` is the PLAN-DEFINED public Encodable output field (plan § op-table row 4: GlobResult{pattern,files,total,capped}) and the JSON wire key — renaming changes the tool's output schema, fighting a documented contract. If the re-review raises this, per finish rules it is a rule-vs-contract conflict: I will report it as a blocker (not rename, not edit validators) rather than break the plan's output schema. (Also a private CharacterClass.negated→isNegated noted, harmless, deferrable.) Left in doing → /test → /commit → /review.
   timestamp: 2026-07-15T22:09:02.376864+00:00
+- actor: claude-code
+  id: 01kxkxka9h7571hqz967c8ws0y
+  text: |-
+    Iteration 2 review: full pass 14/0, prior 2 findings [x] under original framing, but 2 NEW confirmed findings — both the `- Throws:` documentation rule: (1) GlobEngine.swift:71 encode (Encodable conformance) throws w/o -Throws: doc — pre-existing sibling; (2) GlobFiles.swift:28 execute throws w/o -Throws: doc — RECURRENCE/incomplete fix. capped→isCapped naming did NOT fire → no rule-vs-contract conflict to adjudicate.
+
+    LESSON: my iter-2 direction was WRONG. I told the implementer to add a PROSE clause (not a -Throws: field) on execute to "match siblings ReadFile/WriteFile" — but the engine's rule requires a `- Throws:` SECTION on every throwing function. So the box got checked without satisfying the rule, and it recurred. The "don't be an outlier vs siblings" reasoning was a red herring: adding -Throws: is correct and non-contradictory (siblings simply aren't in this delta; if reviewed they'd be flagged too — but they're in DONE tasks, out of THIS task's scope, so not mine to touch here). Iteration 3 will ACTUALLY add -Throws: sections: GlobFiles.execute → "- Throws: Nothing; the signature carries throws to satisfy the OperationDefinition protocol requirement." (honest — it never throws); GlobEngine.encode → "- Throws: Errors forwarded from the encoder." Sweep both files for any other throwing symbol missing -Throws: and fix all in one pass. Looping to /implement iteration 3.
+  timestamp: 2026-07-15T22:15:45.713354+00:00
+- actor: claude-code
+  id: 01kxkxqhe7p2cqry8cwp7yndty
+  text: |-
+    Iteration 3: worked both 17:10 review findings (the `- Throws:` documentation rule). Both flipped to [x]. Real `- Throws:` DocC fields added this time (not prose — the prior recurrence was caused by a prose-only clause that didn't satisfy the rule).
+
+    Changes (docs-only, no code/signature change — confirmed via git diff, all changed lines are `///` comments):
+    - Sources/FileTool/Operations/GlobFiles.swift, execute(in:): added after `- Returns:` → `/// - Throws: Nothing; the signature carries `throws` to satisfy the `OperationDefinition` protocol requirement.` Also removed the now-redundant prose sentence ("The `throws` is carried only to satisfy…matching the sibling ReadFile/WriteFile") from the summary so the real field is the single source of truth.
+    - Sources/FileTool/GlobEngine.swift, GlobOutput.encode(to:): added after `- Parameter encoder:` → `/// - Throws: An error if the encoder fails to encode a value.`
+
+    Sweep of both files for every `throws` symbol lacking `- Throws:`: covered. GlobEngine.swift throwing symbols = encode(to:) [fixed], GlobPattern.init(_:) [already has -Throws], compileSegment [already has], parseCharacterClass [already has]. GlobFiles.swift throwing symbols = execute(in:) [fixed]. Zero recurrences remain in these two files. Left ReadFile.swift/WriteFile.swift untouched (completed task, out of scope).
+
+    Verification: `swift test --filter GlobFilesTests` = 17/17 green; full `swift test` = 105 unit + 1 integration green, exit 0. Task green, left in doing for /review.
+  timestamp: 2026-07-15T22:18:04.103340+00:00
+- actor: claude-code
+  id: 01kxkxr2e1dvf8sdxxa0nq7ghg
+  text: 'Iteration 3: both -Throws: findings fixed for real (docs-only, git diff confirms every changed line is ///). GlobFiles.execute: added real `- Throws: Nothing; the signature carries throws to satisfy the OperationDefinition protocol requirement.` field AND removed the redundant prose sentence (that prose was the iter-2 recurrence — real field is now single source of truth). GlobEngine.GlobOutput.encode: added `- Throws: An error if the encoder fails to encode a value.` Swept BOTH files: GlobEngine throwing symbols encode[fixed], GlobPattern.init/compileSegment/parseCharacterClass[already had -Throws:]; GlobFiles execute[fixed]. Zero recurrences remain in these 2 files. ReadFile/WriteFile untouched (out of scope, DONE tasks). swift test --filter GlobFilesTests 17/17; full 105 unit + 1 integration green. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T22:18:21.505582+00:00
 depends_on:
 - 01KXJWH0ZGPEAKRDWN520P15XY
 position_column: doing
@@ -85,3 +109,8 @@ Per plan.md §3 op table row 4. Create `Sources/FileTool/GlobEngine.swift` and `
 
 - [x] `Sources/FileTool/GlobEngine.swift:382` — The `componentsMatch` function has 4-level deep nesting (switch case > while loop > if/guard statements), exceeding the 3-level threshold. The recursive glob pattern backtracking logic with nested control structures is difficult to reason about. Extract the while-loop backtracking logic for the .recursive case into a separate helper function like `tryRecursiveMatches()` to reduce nesting depth from 4 to 2 levels.
 - [x] `Sources/FileTool/Operations/GlobFiles.swift:37` — Function `execute(in:)` is marked with `throws` in its signature but lacks `- Throws:` documentation as required by the documentation rule for throwing functions. Add `- Throws:` documentation describing what conditions cause the function to throw, or remove `throws` from the function signature if the operation never throws (the implementation always returns a `GlobOutput` result and never throws).
+
+## Review Findings (2026-07-15 17:10)
+
+- [x] `Sources/FileTool/GlobEngine.swift:71` — The `encode` function is marked `throws` in its signature but the documentation lacks a `- Throws:` section; the rule requires documenting every throws clause present in the signature. Add a `- Throws:` section to the doc comment, e.g., `- Throws: encoding errors forwarded from the encoder.`.
+- [x] `Sources/FileTool/Operations/GlobFiles.swift:28` — The `execute` function is marked `throws` in its signature but the documentation lacks a `- Throws:` section; the rule requires documenting every throws clause present in the signature. Add a `- Throws:` section to the doc comment, e.g., `- Throws: nothing, but the signature carries `throws` to conform to the `OperationDefinition` protocol requirement.`.

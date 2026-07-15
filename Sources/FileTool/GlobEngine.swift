@@ -66,6 +66,7 @@ public enum GlobOutput: Encodable, Sendable {
     /// outcome encodes a single `corrective` field carrying the message.
     ///
     /// - Parameter encoder: the encoder to write the outcome into.
+    /// - Throws: An error if the encoder fails to encode a value.
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .content(let result):
