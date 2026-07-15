@@ -45,7 +45,10 @@ extension GlobFiles {
     /// Applies the parameter defaults and delegates to ``GlobEngine/run(pattern:path:caseSensitive:respectGitIgnore:in:)``,
     /// which performs the validation, broad-pattern guard, path bounding, walk,
     /// matching, ordering, and capping. Every recoverable failure is returned as
-    /// ``GlobOutput/corrective(_:)``.
+    /// ``GlobOutput/corrective(_:)``; nothing here throws for a bad pattern, a
+    /// broad pattern, a bad path, or a missing directory. The `throws` is carried
+    /// only to satisfy the `OperationDefinition/execute(in:)` requirement, matching
+    /// the sibling ``ReadFile`` and ``WriteFile`` operations.
     ///
     /// - Parameter context: the shared session context supplying the path guard and root.
     /// - Returns: the ``GlobOutput/content(_:)`` matches on success, or a

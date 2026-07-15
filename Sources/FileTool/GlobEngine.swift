@@ -639,13 +639,7 @@ struct GlobPattern {
         guard let first = patternComponents.first else { return pathComponents.isEmpty }
         switch first {
         case .recursive:
-            let rest = patternComponents.dropFirst()
-            var suffix = pathComponents
-            while true {
-                if componentsMatch(rest, suffix, caseSensitive: caseSensitive) { return true }
-                guard !suffix.isEmpty else { return false }
-                suffix = suffix.dropFirst()
-            }
+            return tryRecursiveMatches(patternComponents.dropFirst(), pathComponents, caseSensitive: caseSensitive)
         case .segment(let tokens):
             guard let head = pathComponents.first,
                 segmentMatches(tokens, Array(head), caseSensitive: caseSensitive)
@@ -653,6 +647,32 @@ struct GlobPattern {
                 return false
             }
             return componentsMatch(patternComponents.dropFirst(), pathComponents.dropFirst(), caseSensitive: caseSensitive)
+        }
+    }
+
+    /// Whether a `**` component followed by `rest` matches `pathComponents`.
+    ///
+    /// A `**` matches any number of path components including zero, so this
+    /// tries `rest` against every suffix of `pathComponents` — from the whole
+    /// slice down to the empty tail — and succeeds as soon as one suffix
+    /// matches. Extracting this backtracking loop keeps ``componentsMatch(_:_:caseSensitive:)``
+    /// shallow rather than nesting the loop inside its `switch`.
+    ///
+    /// - Parameters:
+    ///   - rest: the pattern components following the `**`.
+    ///   - pathComponents: the path components the `**` and `rest` must cover.
+    ///   - caseSensitive: whether matching is case-sensitive.
+    /// - Returns: `true` when `rest` matches some suffix of `pathComponents`.
+    private static func tryRecursiveMatches(
+        _ rest: ArraySlice<Component>,
+        _ pathComponents: ArraySlice<Substring>,
+        caseSensitive: Bool
+    ) -> Bool {
+        var suffix = pathComponents
+        while true {
+            if componentsMatch(rest, suffix, caseSensitive: caseSensitive) { return true }
+            guard !suffix.isEmpty else { return false }
+            suffix = suffix.dropFirst()
         }
     }
 
