@@ -19,6 +19,7 @@ public struct PathViolation: Error, Equatable, Sendable, CustomStringConvertible
         self.message = message
     }
 
+    /// The violation's textual representation, which is its corrective ``message``.
     public var description: String { message }
 }
 
@@ -333,12 +334,11 @@ public struct PathGuard: Sendable {
             }
 
         case .write:
-            if fileExists(path) {
-                if Self.isReadOnly(path) {
-                    return .failure(PathViolation("File is read-only: \(path)"))
-                }
-            } else {
+            guard fileExists(path) else {
                 return parentDirectoryMissing(path)
+            }
+            if Self.isReadOnly(path) {
+                return .failure(PathViolation("File is read-only: \(path)"))
             }
 
         case .edit:
