@@ -43,6 +43,9 @@ public enum Hashline {
 
     /// Render a hash byte as two lowercase hexadecimal characters
     /// (`0xa3` -> `"a3"`, `0x0f` -> `"0f"`).
+    ///
+    /// - Parameter hash: the hash byte to render.
+    /// - Returns: two lowercase hexadecimal characters.
     public static func renderHash(_ hash: UInt8) -> String {
         String(format: "%02x", hash)
     }
@@ -92,13 +95,19 @@ public enum Hashline {
     ///
     /// An optional `|text` suffix is tolerated and ignored here (the caller uses
     /// the text for verification or fallback; see ``resolveAnchor(_:in:)``).
-    /// Returns `nil` for anything that is not a well-formed anchor: the line must
-    /// parse as a Rust `usize` (an optional single leading `+` then a non-empty
-    /// run of ASCII decimal digits — `-` and whitespace rejected) and the hash
-    /// must be exactly two hex digits.
-    public static func parseAnchor(_ s: String) -> (line: Int, hash: UInt8)? {
+    ///
+    /// - Parameter anchorString: the anchor to parse, in the dialect `N:HH` with
+    ///   an optional `|text` suffix.
+    /// - Returns: the 1-based `line` number and `hash` byte, or `nil` for
+    ///   anything that is not a well-formed anchor: the line must parse as a Rust
+    ///   `usize` (an optional single leading `+` then a non-empty run of ASCII
+    ///   decimal digits — `-` and whitespace rejected) and the hash must be
+    ///   exactly two hex digits.
+    public static func parseAnchor(_ anchorString: String) -> (line: Int, hash: UInt8)? {
         // Strip an optional `|text` suffix; the text is ignored here.
-        let anchor: Substring = s.firstIndex(of: "|").map { s[s.startIndex..<$0] } ?? Substring(s)
+        let anchor: Substring =
+            anchorString.firstIndex(of: "|").map { anchorString[anchorString.startIndex..<$0] }
+            ?? Substring(anchorString)
         guard let colon = anchor.firstIndex(of: ":") else { return nil }
         let number = anchor[anchor.startIndex..<colon]
         let hex = anchor[anchor.index(after: colon)...]
@@ -126,6 +135,13 @@ public enum Hashline {
     /// ``resolveAnchorIn(_:line:hash:text:)`` for the exact rule. A caller that
     /// gets `nil` should fall through to literal interpretation rather than
     /// misapply.
+    ///
+    /// - Parameters:
+    ///   - anchor: the hashline anchor, in the dialect `N:HH` with an optional
+    ///     `|text` suffix.
+    ///   - content: the text to resolve the anchor against.
+    /// - Returns: the **1-based** line number the anchor resolves to, or `nil`
+    ///   when the anchor is malformed, stale, or unresolvable.
     public static func resolveAnchor(_ anchor: String, in content: String) -> Int? {
         guard let (line, hash) = parseAnchor(anchor) else { return nil }
         let text: String? = anchor.firstIndex(of: "|").map { String(anchor[anchor.index(after: $0)...]) }
@@ -150,6 +166,16 @@ public enum Hashline {
     ///
     /// `line == 0` (or any non-positive line) is treated as "no exact candidate"
     /// and the search proceeds from the first line. Performs no IO.
+    ///
+    /// - Parameters:
+    ///   - content: the text to resolve the anchor against.
+    ///   - line: the anchor's 1-based line number; `0` or negative means "no
+    ///     exact candidate".
+    ///   - hash: the content hash a candidate line must match.
+    ///   - text: the optional `|text` suffix used to verify/relocate a candidate;
+    ///     `nil` when the anchor carried no text.
+    /// - Returns: the **1-based** line number the anchor resolves to, or `nil`
+    ///   when nothing in the proximity window hashes to `hash`.
     public static func resolveAnchorIn(_ content: String, line: Int, hash: UInt8, text: String?) -> Int? {
         let lines = splitLines(content).map(\.text)
         return resolveIndex(lines, line: line, hash: hash, text: text).map { $0 + 1 }

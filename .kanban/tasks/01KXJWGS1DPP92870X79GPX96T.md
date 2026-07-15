@@ -62,6 +62,28 @@ comments:
   id: 01kxk8qpp1t5e8edvz2kxe27cz
   text: 'Iteration 2: all 11 findings fixed at root in Hashline.swift (pure visibility+naming, zero logic change). Made public: Hashline enum, proximityWindow, hashLine, renderHash, tag, wholeFileHash, parseAnchor, resolveAnchor, resolveAnchorIn (added hashLine+parseAnchor beyond the 7 cited — both pub in the Rust crate, so re-review finds zero recurrences). Kept helpers private (resolveIndex, Line, splitLines, trimHorizontal, crc32Table, crc32). Naming: num→number (3), idx→index (3 helpers); whole-file sweep clean. Golden fixture untouched (git diff confirms), all 5 parity tests pass. swift test --filter HashlineTests 16/16, full suite green. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T16:11:09.377276+00:00
+- actor: claude-code
+  id: 01kxk9d7twbc0ktdgh8zfpsd7a
+  text: 'Iteration 2 review: prior 11 findings all verified resolved [x]. 9 NEW findings surfaced (all confirmed), all doc/naming on now-public API in Hashline.swift — exposed BECAUSE iteration 2 made symbols public (public API demands complete DocC): renderHash missing -Returns:/param doc; parseAnchor param `s`→descriptive (e.g. anchorString) + missing -Returns:/param doc; resolveAnchor missing -Returns:/-Parameters:; resolveAnchorIn missing -Returns:/-Parameters:. These are distinct from the prior 11 (guardrail tracks same finding 3× — not tripped). Looping to /implement iteration 3: add complete DocC to all public symbols and rename abbreviated params at root.'
+  timestamp: 2026-07-15T16:22:55.068311+00:00
+- actor: claude-code
+  id: 01kxk9ns1rvz68p13sqm13tg07
+  text: |-
+    Iteration 3 done, green. All 9 "Review Findings (2026-07-15 11:12)" fixed at root in Sources/FileTool/Hashline.swift and flipped to [x]. Pure DocC + parameter-name diff; zero hashing/anchor/CRC/MD5/split/trim logic changed; golden fixture untouched (git status confirms only Hashline.swift changed).
+
+    Audited EVERY public symbol, not just cited ones. Added complete DocC (summary + per-parameter doc + `- Returns:` on non-Void):
+    - renderHash: added `- Parameter hash:` + `- Returns:` (was summary-only).
+    - parseAnchor: renamed param `s`→`anchorString` (unlabeled `_`, so no call-site/label change) and updated both internal refs; added `- Parameter anchorString:` + `- Returns:` (moved the "nil for malformed" rule into the Returns block).
+    - resolveAnchor: added `- Parameters:` (anchor, content) + `- Returns:`.
+    - resolveAnchorIn: added `- Parameters:` (content, line, hash, text) + `- Returns:`.
+    Already-complete symbols left as-is: Hashline enum, proximityWindow (no params/return), hashLine, tag, wholeFileHash. Swept for other single-letter/abbreviated params on public API — only `s` qualified; internal helpers (crc32's `c`, tag's `n`/`out`, trimHorizontal's `s`) are private, not public API, left untouched per prior-iteration scope.
+
+    Verification: `swift test --filter HashlineTests` = 16/16 green (all 5 Rust golden-vector parity tests pass bit-exact: hashLine/tag/wholeFileHash/parseAnchor/resolveAnchor). Full `swift test` = 17 (FileToolTests) + 1 (integration) green. No source warnings (the mlx-swift bundle build-system warning is pre-existing/unrelated). Advisory double-check returned PASS (confirmed docs-only + rename, no behavioral drift, golden fixture untouched). Leaving task in doing for /review.
+  timestamp: 2026-07-15T16:27:34.840246+00:00
+- actor: claude-code
+  id: 01kxk9pc53gn8ke51xqy245m81
+  text: 'Iteration 3: all 9 doc/naming findings fixed at root in Hashline.swift (DocC + one internal param rename, zero logic change). Added -Parameter/-Returns to renderHash, parseAnchor, resolveAnchor, resolveAnchorIn; renamed unlabeled param s→anchorString (no external label change). Verified Hashline enum/proximityWindow/hashLine/tag/wholeFileHash already fully documented. Remaining short names (c/n/out/s) are all on private helpers, not public API. Golden fixture untouched (git confirms only Hashline.swift + kanban changed); all 5 parity tests pass. swift test --filter HashlineTests 16/16, full suite green, double-check PASS. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T16:27:54.403265+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
 position_column: doing
@@ -101,3 +123,15 @@ Generate golden-vector fixtures from the Rust crate (small program or test dump 
 - [x] `Sources/FileTool/Hashline.swift:120` — The parameter `idx` in the nested `hashMatches(_:)` function is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used for clarity. Rename parameter to `index`: `func hashMatches(_ index: Int) -> Bool { index >= 0 && index < lines.count && hashLine(lines[index]) == hash }`.
 - [x] `Sources/FileTool/Hashline.swift:123` — The parameter `idx` in the nested `textMatches(_:)` function is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used for clarity. Rename parameter to `index`: `func textMatches(_ index: Int) -> Bool { guard let wanted = text, index >= 0, index < lines.count else { return false } return trimHorizontal(lines[index]) == trimHorizontal(wanted) }`.
 - [x] `Sources/FileTool/Hashline.swift:176` — The parameter `idx` in the nested `text(upTo:)` function inside `splitLines(_:)` is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used. Rename parameter to `index`: `func text(upTo index: String.UnicodeScalarView.Index) -> String { String(String.UnicodeScalarView(scalars[lineStart..<index])) }`.
+
+## Review Findings (2026-07-15 11:12)
+
+- [x] `Sources/FileTool/Hashline.swift:37` — `renderHash` returns `String` (non-Void) but has no `- Returns:` block; rule states '`- Returns:` appears iff the result is non-`Void`'. Add `- Returns:` section: `- Returns: two lowercase hexadecimal characters.`.
+- [x] `Sources/FileTool/Hashline.swift:37` — `renderHash` has parameter `hash` but no formal parameter documentation; inconsistent with `hashLine` and `wholeFileHash` which include parameter docs. Add `- Parameter hash:` documentation.
+- [x] `Sources/FileTool/Hashline.swift:68` — Parameter `s` in public API is abbreviated; should be descriptive per refactor goal to 'clarify parameter names'. Rename parameter `s` to `anchorString` or `input`.
+- [x] `Sources/FileTool/Hashline.swift:68` — `parseAnchor` returns non-Void `(line: Int, hash: UInt8)?` but has no `- Returns:` block. Add `- Returns:` section describing the returned tuple.
+- [x] `Sources/FileTool/Hashline.swift:68` — `parseAnchor` has parameter but no formal parameter documentation; inconsistent with other functions that document parameters. Add parameter documentation for anchor string input.
+- [x] `Sources/FileTool/Hashline.swift:86` — `resolveAnchor` returns non-Void `Int?` but has no `- Returns:` block. Add `- Returns:` section.
+- [x] `Sources/FileTool/Hashline.swift:86` — `resolveAnchor` has two parameters but no formal `- Parameters:` block; inconsistent with `tag` function (line 42) which documents its parameters. Add `- Parameters:` block documenting both parameters.
+- [x] `Sources/FileTool/Hashline.swift:97` — `resolveAnchorIn` returns non-Void `Int?` but has no `- Returns:` block. Add `- Returns:` section.
+- [x] `Sources/FileTool/Hashline.swift:97` — `resolveAnchorIn` has four parameters but no formal `- Parameters:` block; inconsistent with other multi-parameter functions. Add `- Parameters:` block documenting all four parameters.
