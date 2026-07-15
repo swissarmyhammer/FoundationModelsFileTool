@@ -78,7 +78,7 @@ public enum ReadOutput: Encodable, Sendable {
 /// on-disk bytes, rejects a non-UTF-8 (binary) file rather than ever decoding
 /// it, windows the decoded text by ``offset`` / ``limit`` over lines, and — in
 /// the default `hashline` format — tags each windowed line with an absolute
-/// hashline anchor via ``Hashline/tag(lines:startLine:)``. The whole-file
+/// hashline anchor via ``Hashline/tag(lines:startingAtLine:)``. The whole-file
 /// freshness token is the lowercase-hex MD5 over the full bytes regardless of
 /// the window, so it never changes with the offset or limit.
 @Generable
@@ -256,7 +256,7 @@ extension ReadFile {
     ///
     /// Splits the content into physical lines, selects the ``offset`` / ``limit``
     /// window (clamped to the file's bounds), and renders each windowed line —
-    /// as an absolute hashline anchor via ``Hashline/tag(lines:startLine:)`` for
+    /// as an absolute hashline anchor via ``Hashline/tag(lines:startingAtLine:)`` for
     /// the `hashline` format, or verbatim for `plain`. The ``ReadResult/hash`` is
     /// carried through unchanged so it reflects the full file, not the window.
     ///
@@ -287,7 +287,7 @@ extension ReadFile {
             lines = windowSlice.map(\.text)
         case .hashline:
             let windowContent = windowSlice.map { $0.text + $0.terminator }.joined()
-            let tagged = Hashline.tag(lines: windowContent, startLine: startIndex + 1)
+            let tagged = Hashline.tag(lines: windowContent, startingAtLine: startIndex + 1)
             lines = Hashline.splitLines(tagged).map(\.text)
         }
 

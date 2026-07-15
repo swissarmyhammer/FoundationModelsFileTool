@@ -83,7 +83,7 @@ import Testing
     @Test func tagMatchesRustGoldenVectors() throws {
         for c in try Self.loadGolden().tag {
             #expect(
-                Hashline.tag(lines: c.content, startLine: c.startLine) == c.expected,
+                Hashline.tag(lines: c.content, startingAtLine: c.startLine) == c.expected,
                 "tag(\(c.content.debugDescription), \(c.startLine)) mismatch"
             )
         }
@@ -182,14 +182,14 @@ import Testing
         let content = "alpha\nbeta\ngamma\n"
         let bytes = Data(content.utf8)
         #expect(Hashline.wholeFileHash(bytes: bytes) == Hashline.wholeFileHash(bytes: bytes))
-        #expect(Hashline.tag(lines: content, startLine: 1) == Hashline.tag(lines: content, startLine: 1))
+        #expect(Hashline.tag(lines: content, startingAtLine: 1) == Hashline.tag(lines: content, startingAtLine: 1))
         #expect(Hashline.hashLine("beta") == Hashline.hashLine("beta"))
         // A changed file yields a different token.
         #expect(Hashline.wholeFileHash(bytes: bytes) != Hashline.wholeFileHash(bytes: Data("alpha\nBETA\ngamma\n".utf8)))
     }
 
     @Test func emptyFileAndEmptyLineEdgeCases() {
-        #expect(Hashline.tag(lines: "", startLine: 1) == "")
+        #expect(Hashline.tag(lines: "", startingAtLine: 1) == "")
         #expect(Hashline.hashLine("") == 0)
         #expect(Hashline.resolveAnchorIn("", line: 1, hash: 0, text: nil) == nil)
         // MD5 of the empty byte string.
@@ -202,7 +202,7 @@ import Testing
         // Lift an anchor back out of tagged content and resolve it, exactly as
         // `edit file` will: the anchor string carries `N:HH|text`.
         let content = "one\ntwo\nthree"
-        let tagged = Hashline.tag(lines: content, startLine: 1)
+        let tagged = Hashline.tag(lines: content, startingAtLine: 1)
         let secondAnchor = String(tagged.split(separator: "\n")[1])  // "2:HH|two"
         #expect(Hashline.resolveAnchor(secondAnchor, in: content) == 2)
     }
@@ -210,7 +210,7 @@ import Testing
     @Test func resolveAnchorStringRelocatesUnderDrift() {
         // Anchor lifted from the original; content then drifted by an insertion.
         let original = "one\ntwo\nthree"
-        let tagged = Hashline.tag(lines: original, startLine: 1)
+        let tagged = Hashline.tag(lines: original, startingAtLine: 1)
         let secondAnchor = String(tagged.split(separator: "\n")[1])  // anchors "two" at line 2
         let drifted = "one\nINSERTED\ntwo\nthree"
         #expect(Hashline.resolveAnchor(secondAnchor, in: drifted) == 3)

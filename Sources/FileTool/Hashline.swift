@@ -75,11 +75,11 @@ public enum Hashline {
     ///   - content: the raw file content, terminators intact.
     ///   - startLine: the 1-based line number assigned to the first line.
     /// - Returns: the tagged content as a single string.
-    public static func tag(lines content: String, startLine: Int) -> String {
+    public static func tag(lines content: String, startingAtLine startLine: Int) -> String {
         var out = ""
         for (offset, line) in splitLines(content).enumerated() {
             let n = startLine + offset
-            out += "\(n):\(renderHash(hashLine(line.text)))|\(line.text)\(line.terminator)"
+            out += "\(n):\(renderHash(hashLine(line.text)))\(anchorTextDelimiter)\(line.text)\(line.terminator)"
         }
         return out
     }
@@ -103,8 +103,8 @@ public enum Hashline {
 
     /// The delimiter separating an anchor's `N:HH` head from its optional `|text` suffix.
     ///
-    /// Shared by ``parseAnchor(_:)`` and ``resolveAnchor(_:in:)`` so the dialect
-    /// is defined in one place.
+    /// Shared by ``tag(lines:startingAtLine:)``, ``parseAnchor(_:)``, and
+    /// ``resolveAnchor(_:in:)`` so the dialect is defined in one place.
     private static let anchorTextDelimiter: Character = "|"
 
     /// Parse a hashline anchor in the `N:HH` format.
@@ -261,7 +261,7 @@ public enum Hashline {
     /// exactly as the Rust byte scan does, rather than as a single grapheme
     /// cluster). Empty content yields no lines; content ending in a terminator
     /// yields no phantom trailing empty line. This is the single line model the
-    /// hashline anchors emitted by ``tag(lines:startLine:)`` are numbered
+    /// hashline anchors emitted by ``tag(lines:startingAtLine:)`` are numbered
     /// against, so windowing callers split with the same rule the anchors use.
     ///
     /// - Parameter content: the text to split into physical lines.
