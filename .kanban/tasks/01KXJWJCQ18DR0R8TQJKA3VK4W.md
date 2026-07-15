@@ -102,10 +102,14 @@ comments:
   id: 01kxkydagy49aaqt1nc82yxps2
   text: 'Iteration 4: finding fixed, behavior-preserving. Added GlobPattern.recursiveComponent = "**" (one-line DocC). JUDGMENT: made it INTERNAL not private (finding''s example said private) — the literal lives in TWO types (GlobEngine.broadPatternRules + GlobPattern), and a private static in one struct is unreachable from the other, so a shared constant must be internal; homed on GlobPattern which owns the recursive-component concept. All 3 bare "**" sites converted: broadPatternRules .exact("**")→.exact(GlobPattern.recursiveComponent); GlobPattern.init isFilenameOnly contains; component-loop part=="**"→String(part)==Self.recursiveComponent. Distinct literals "**/*" and "**/*." (broadExtensionPrefix) deliberately NOT conflated. Only remaining "**" is the constant def. Byte-identical (double-check PASS: same contains overload, same String/Substring equality). swift test --filter GlobFilesTests 17/17; full 105 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T22:29:57.918331+00:00
+- actor: claude-code
+  id: 01kxkypzajq4pr73632txj4amb
+  text: 'DONE. Iteration 4 re-review clean (full 14/0, 0 findings). All 3 review-findings sections resolved. Task moved doing→review→done. Converged in 4 iterations (findings/round: 2→2→2→1→0; dimensions nesting+docs→docs(-Throws recurrence)→dup-literal; security/correctness/design clean throughout — broad-pattern guard, git subprocess, canonicalization all 0 findings). Reused PathGuard; git-ls-files-with-FileManager-fallback walk; data-driven broad-pattern guard; found+fixed a real firmlink-canonicalization bug in iter 1. Verified-good local commit: 60d62a3 (green build+test 106/106, stable across reruns). Not pushed. Checkpoint commits: 5c71a10, cb6649a, c4ac504, 60d62a3. Note: the capped→isCapped potential contradiction I pre-flagged never fired.'
+  timestamp: 2026-07-15T22:35:14.130562+00:00
 depends_on:
 - 01KXJWH0ZGPEAKRDWN520P15XY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8680'
 title: GlobEngine + glob files operation
 ---
 ## What

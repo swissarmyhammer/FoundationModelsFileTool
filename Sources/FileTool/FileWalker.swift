@@ -1,0 +1,156 @@
+import Darwin
+import Foundation
+
+/// The shared, git-aware filesystem walk behind both ``GlobEngine`` and ``GrepEngine``.
+///
+/// Both engines enumerate the candidate files under a search root the same way:
+/// when a repository is present and its ignore rules are being honored, the
+/// git-aware listing (`git ls-files --cached --others --exclude-standard`) is
+/// used so ignored files — and, crucially, whole ignored directories such as a
+/// `build/` tree — are never descended into; otherwise a plain `FileManager`
+/// walk is used. Sharing that walk in one place keeps the two engines byte
+/// identical and means the "unscoped grep never touches the ignored `build/`
+/// directory" fix and the firmlink-aware ``canonicalDirectory(_:)`` resolution
+/// live in exactly one implementation rather than being copy-pasted.
+///
+/// The type is a pure namespace of stateless static helpers; it holds no state
+/// and is never instantiated.
+enum FileWalker {
+    // MARK: Filesystem walk
+
+    /// Enumerates the candidate files under a search root as absolute paths.
+    ///
+    /// When `respectGitIgnore` is set and `walkRoot` is inside a git repository,
+    /// the git-aware listing (`git ls-files --cached --others --exclude-standard`)
+    /// is used so ignored files are skipped without hand-rolling gitignore
+    /// parsing; otherwise, and whenever git is unavailable or the directory is
+    /// not a repository, a plain `FileManager` walk is used.
+    ///
+    /// - Parameters:
+    ///   - walkRoot: the canonical search root.
+    ///   - respectGitIgnore: whether to prefer the git-aware listing.
+    /// - Returns: the absolute paths of the candidate regular files.
+    static func collectFiles(walkRoot: URL, respectGitIgnore: Bool) -> [String] {
+        if respectGitIgnore, let relativePaths = gitListedFiles(in: walkRoot) {
+            return relativePaths.map { walkRoot.path + "/" + $0 }
+        }
+        return enumeratedRegularFiles(under: walkRoot)
+    }
+
+    /// The git-listed files under a directory, or `nil` when it is not a repository.
+    ///
+    /// Runs `git ls-files --cached --others --exclude-standard -z` with the given
+    /// directory as the working directory, so the output is the repository's
+    /// tracked and untracked-but-not-ignored files under that directory, one
+    /// NUL-separated relative path each. A nonzero exit (most commonly "not a git
+    /// repository") or a launch failure yields `nil`, signaling the caller to
+    /// fall back to a plain walk.
+    ///
+    /// - Parameter directory: the directory to list, used as git's working directory.
+    /// - Returns: the NUL-separated relative paths, or `nil` when git is
+    ///   unavailable or the directory is not a repository.
+    private static func gitListedFiles(in directory: URL) -> [String]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"]
+        process.currentDirectoryURL = directory
+        let standardOutput = Pipe()
+        let standardError = Pipe()
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = standardOutput.fileHandleForReading.readDataToEndOfFile()
+        _ = try? standardError.fileHandleForReading.readToEnd()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+
+        let text = String(decoding: data, as: UTF8.self)
+        return text.split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    /// The absolute paths of the regular files under a directory, walked recursively.
+    ///
+    /// Directories are traversed but only regular files are returned, so the
+    /// result is directly comparable to the git-aware listing.
+    ///
+    /// - Parameter root: the canonical search root to walk.
+    /// - Returns: the absolute paths of the regular files found.
+    private static func enumeratedRegularFiles(under root: URL) -> [String] {
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [],
+                errorHandler: nil
+            )
+        else {
+            return []
+        }
+        var paths: [String] = []
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            if values?.isRegularFile == true { paths.append(url.path) }
+        }
+        return paths
+    }
+
+    // MARK: Filesystem probes
+
+    /// The canonical directory URL for a path, with symlinks fully resolved.
+    ///
+    /// Uses `realpath`, which resolves the firmlinks (`/var`, `/tmp`) that
+    /// `URL.resolvingSymlinksInPath()` leaves untouched, so the returned prefix
+    /// matches the paths a `FileManager` enumerator yields. Falls back to the
+    /// input URL when the path cannot be resolved (for example a nonexistent
+    /// directory, which the caller rejects separately).
+    ///
+    /// - Parameter url: the directory URL to canonicalize.
+    /// - Returns: the canonical directory URL, or `url` when `realpath` fails.
+    static func canonicalDirectory(_ url: URL) -> URL {
+        guard let resolved = realpath(url.path, nil) else { return url }
+        defer { free(resolved) }
+        return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+    }
+
+    /// Whether a path names an existing directory.
+    ///
+    /// - Parameter path: the path to test.
+    /// - Returns: `true` when the path exists and is a directory.
+    static func isDirectory(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    // MARK: Relative paths
+
+    /// The path of `absolute` relative to `root`, or `nil` when it is not under `root`.
+    ///
+    /// Compares the two paths component-wise (not as string prefixes) so
+    /// `/foobar` is not considered inside `/foo`, and rejoins the remaining
+    /// components with `/`.
+    ///
+    /// - Parameters:
+    ///   - absolute: the absolute path to relativize.
+    ///   - root: the absolute root the path should be under.
+    /// - Returns: the relative path, or `nil` when `absolute` is not under `root`.
+    static func relativePath(ofAbsolute absolute: String, under root: String) -> String? {
+        let rootComponents = pathComponents(root)
+        let absoluteComponents = pathComponents(absolute)
+        guard absoluteComponents.count >= rootComponents.count else { return nil }
+        guard Array(absoluteComponents.prefix(rootComponents.count)) == rootComponents else { return nil }
+        return absoluteComponents.dropFirst(rootComponents.count).joined(separator: "/")
+    }
+
+    /// The non-empty path components of a path (leading, trailing, and repeated slashes dropped).
+    ///
+    /// - Parameter path: the path to split.
+    /// - Returns: the path's non-empty components.
+    private static func pathComponents(_ path: String) -> [String] {
+        path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    }
+}
