@@ -153,65 +153,108 @@ public struct PathGuard: Sendable {
     /// - Returns: `.success` with the resolved absolute URL, or `.failure` with
     ///   a corrective ``PathViolation``.
     public func validatePath(_ path: String) -> Result<URL, PathViolation> {
-        if path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return .failure(PathViolation("File path cannot be empty"))
-        }
-        if let violation = Self.lengthViolation(path) {
-            return .failure(violation)
-        }
-        for pattern in Self.blockedPatterns where path.contains(pattern) {
-            return .failure(PathViolation("Path contains blocked pattern '\(pattern)': \(path)"))
-        }
+        if let violation = Self.emptyViolation(path) { return .failure(violation) }
+        if let violation = Self.lengthViolation(path) { return .failure(violation) }
+        if let violation = Self.blockedPatternViolation(path) { return .failure(violation) }
 
         let resolvedPath = path.hasPrefix("/") ? path : Self.join(root.path, path)
 
         // Re-check the length of the resolved path: a short relative input can
         // exceed the limit once joined to the session root. Mirrors the Rust
         // nested length check in `validate_file_path`.
-        if let violation = Self.lengthViolation(resolvedPath) {
-            return .failure(violation)
-        }
+        if let violation = Self.lengthViolation(resolvedPath) { return .failure(violation) }
+        if let violation = symlinkBeforeCanonicalizationViolation(resolvedPath) { return .failure(violation) }
 
-        if isSymlink(resolvedPath) && !allowSymlinks {
-            return .failure(PathViolation("Symlinks are not allowed: \(resolvedPath)"))
+        return handleCanonicalizeResult(resolvedPath).flatMap { validatedPath in
+            finishValidation(originalPath: resolvedPath, validatedPath: validatedPath)
         }
+    }
 
-        let validatedPath: String
+    /// A `.success` with the canonical path, or the errno-mapped canonicalization violation.
+    ///
+    /// Splits the ``CanonicalizeOutcome`` of ``canonicalize(_:)`` into a
+    /// `Result`: a resolved path succeeds; a failure is dispatched by its POSIX
+    /// `errno` through ``canonicalizeFailureViolation(_:resolvedPath:)``. The
+    /// `ENOENT` case is not itself a violation — a not-yet-created target with
+    /// an existing parent yields the uncanonicalized `resolvedPath`.
+    ///
+    /// - Parameter resolvedPath: the resolved absolute path to canonicalize.
+    /// - Returns: `.success` with the path to operate on, or `.failure` with a
+    ///   corrective ``PathViolation``.
+    private func handleCanonicalizeResult(_ resolvedPath: String) -> Result<String, PathViolation> {
         switch Self.canonicalize(resolvedPath) {
         case .resolved(let canonical):
-            validatedPath = canonical
+            return .success(canonical)
         case .failed(let errorNumber):
-            switch errorNumber {
-            case ENOENT:
-                // The path does not exist. This is acceptable for a write
-                // target as long as the parent directory exists.
-                if case .failure(let violation) = parentDirectoryMissing(resolvedPath) {
-                    return .failure(violation)
-                }
-                validatedPath = resolvedPath
-            case EACCES:
-                return .failure(PathViolation("Permission denied accessing path: \(resolvedPath)"))
-            case EINVAL:
-                return .failure(PathViolation("Invalid path format: \(resolvedPath)"))
-            default:
-                return .failure(
-                    PathViolation("Failed to resolve path '\(resolvedPath)': \(String(cString: strerror(errorNumber)))")
-                )
-            }
+            return canonicalizeFailureViolation(errorNumber, resolvedPath: resolvedPath)
         }
+    }
 
-        if Self.containsInvalidControlCharacter(validatedPath) {
-            return .failure(PathViolation("Path contains invalid control characters"))
+    /// Map a `realpath` `errno` to a canonicalization outcome for `resolvedPath`.
+    ///
+    /// The deliberately preserved errno-dispatch table: `ENOENT` (path does not
+    /// exist) is acceptable for a not-yet-created write target as long as the
+    /// parent directory exists, so it yields the uncanonicalized `resolvedPath`;
+    /// `EACCES`, `EINVAL`, and any other `errno` become corrective violations.
+    ///
+    /// - Parameters:
+    ///   - errorNumber: the POSIX `errno` from the failed `realpath`.
+    ///   - resolvedPath: the resolved absolute path that failed to canonicalize.
+    /// - Returns: `.success` with `resolvedPath` for an acceptable `ENOENT`, or
+    ///   `.failure` with a corrective ``PathViolation``.
+    private func canonicalizeFailureViolation(
+        _ errorNumber: Int32,
+        resolvedPath: String
+    ) -> Result<String, PathViolation> {
+        switch errorNumber {
+        case ENOENT:
+            return parentDirectoryMissing(resolvedPath).map { resolvedPath }
+        case EACCES:
+            return .failure(PathViolation("Permission denied accessing path: \(resolvedPath)"))
+        case EINVAL:
+            return .failure(PathViolation("Invalid path format: \(resolvedPath)"))
+        default:
+            return .failure(
+                PathViolation("Failed to resolve path '\(resolvedPath)': \(String(cString: strerror(errorNumber)))")
+            )
         }
+    }
 
-        // Enforce the workspace boundary once here (after control-character
-        // validation) and, when symlinks are opted in, again on the symlink's
-        // real target inside `resolveSymlinkIfAllowed`, so both the requested
-        // path and its resolved target must stay within the boundary. Both
-        // stages route through `enforceWorkspaceBoundary`.
+    /// Run the post-canonicalization checks and produce the resolved URL.
+    ///
+    /// Applies, in order, control-character rejection on the canonical path and
+    /// workspace-boundary enforcement, then re-resolves an opted-in symlink to
+    /// its real target and re-checks the boundary. The boundary is enforced once
+    /// here (after control-character validation) and, when symlinks are opted
+    /// in, again on the symlink's real target inside ``resolveSymlinkIfAllowed``,
+    /// so both the requested path and its resolved target must stay within the
+    /// boundary. Both stages route through ``enforceWorkspaceBoundary(_:)``.
+    ///
+    /// - Parameters:
+    ///   - originalPath: the pre-canonicalization resolved path, tested for being
+    ///     a symlink.
+    ///   - validatedPath: the canonical path to check and resolve.
+    /// - Returns: `.success` with the resolved absolute URL, or `.failure` with a
+    ///   corrective ``PathViolation``.
+    private func finishValidation(originalPath: String, validatedPath: String) -> Result<URL, PathViolation> {
+        if let violation = Self.controlCharacterViolation(validatedPath) { return .failure(violation) }
         return enforceWorkspaceBoundary(validatedPath)
-            .flatMap { resolveSymlinkIfAllowed(originalPath: resolvedPath, validatedPath: validatedPath) }
+            .flatMap { resolveSymlinkIfAllowed(originalPath: originalPath, validatedPath: validatedPath) }
             .map { URL(fileURLWithPath: $0) }
+    }
+
+    /// A "symlinks not allowed" violation when a path is a rejected symlink, else `nil`.
+    ///
+    /// Rejects a path that is itself a symlink before canonicalization when
+    /// ``allowSymlinks`` is `false`, so a link to a nonexistent or out-of-bounds
+    /// target cannot slip through. Returns `nil` when the path is not a symlink
+    /// or symlinks are opted in.
+    ///
+    /// - Parameter path: the resolved path to test for being a rejected symlink.
+    /// - Returns: a corrective ``PathViolation``, or `nil` when acceptable.
+    private func symlinkBeforeCanonicalizationViolation(_ path: String) -> PathViolation? {
+        guard isSymlink(path) && !allowSymlinks else { return nil }
+        return PathViolation("Symlinks are not allowed: \(path)")
     }
 
     /// Enforce the workspace boundary on a path when a boundary is configured.
@@ -329,37 +372,82 @@ public struct PathGuard: Sendable {
         let path = url.path
         switch operation {
         case .read:
-            guard fileExists(path) else { return .success(()) }
-            guard let mode = Self.fileMode(path) else {
-                return .failure(PathViolation("Failed to get file metadata: \(path)"))
-            }
-            if (mode & S_IFMT) != S_IFREG {
-                return .failure(PathViolation("Path is not a regular file: \(path)"))
-            }
-            if (mode & 0o444) == 0 {
-                return .failure(PathViolation("File is not readable (no read permissions): \(path)"))
-            }
-
+            return checkReadPermission(path)
         case .write:
-            guard fileExists(path) else {
-                return parentDirectoryMissing(path)
-            }
-            if Self.isReadOnly(path) {
-                return .failure(PathViolation("File is read-only: \(path)"))
-            }
-
+            return checkWritePermission(path)
         case .edit:
-            if !fileExists(path) {
-                return .failure(PathViolation("Cannot edit non-existent file: \(path)"))
-            }
-            if Self.isReadOnly(path) {
-                return .failure(PathViolation("File is read-only and cannot be edited: \(path)"))
-            }
-
+            return checkEditPermission(path)
         case .directory:
-            if fileExists(path), (Self.fileMode(path).map { ($0 & S_IFMT) != S_IFDIR }) ?? true {
-                return .failure(PathViolation("Path exists but is not a directory: \(path)"))
-            }
+            return checkDirectoryPermission(path)
+        }
+    }
+
+    /// Check that a path may be read: an existing path must be a readable regular file.
+    ///
+    /// A nonexistent path succeeds (there is nothing to protect); an existing
+    /// path must be a regular file with at least one read bit (`0o444`).
+    ///
+    /// - Parameter path: the resolved path to check.
+    /// - Returns: `.success` when readable (or nonexistent), or `.failure` with a
+    ///   corrective ``PathViolation``.
+    private func checkReadPermission(_ path: String) -> Result<Void, PathViolation> {
+        guard fileExists(path) else { return .success(()) }
+        guard let mode = Self.fileMode(path) else {
+            return .failure(PathViolation("Failed to get file metadata: \(path)"))
+        }
+        if (mode & S_IFMT) != S_IFREG {
+            return .failure(PathViolation("Path is not a regular file: \(path)"))
+        }
+        if (mode & 0o444) == 0 {
+            return .failure(PathViolation("File is not readable (no read permissions): \(path)"))
+        }
+        return .success(())
+    }
+
+    /// Check that a path may be written: an existing file must not be read-only.
+    ///
+    /// An existing file must have at least one write bit; a nonexistent target
+    /// is acceptable only when its parent directory exists.
+    ///
+    /// - Parameter path: the resolved path to check.
+    /// - Returns: `.success` when writable, or `.failure` with a corrective
+    ///   ``PathViolation``.
+    private func checkWritePermission(_ path: String) -> Result<Void, PathViolation> {
+        guard fileExists(path) else { return parentDirectoryMissing(path) }
+        if Self.isReadOnly(path) {
+            return .failure(PathViolation("File is read-only: \(path)"))
+        }
+        return .success(())
+    }
+
+    /// Check that a path may be edited: the file must exist and not be read-only.
+    ///
+    /// Unlike `write`, editing requires the file to already exist.
+    ///
+    /// - Parameter path: the resolved path to check.
+    /// - Returns: `.success` when editable, or `.failure` with a corrective
+    ///   ``PathViolation``.
+    private func checkEditPermission(_ path: String) -> Result<Void, PathViolation> {
+        if !fileExists(path) {
+            return .failure(PathViolation("Cannot edit non-existent file: \(path)"))
+        }
+        if Self.isReadOnly(path) {
+            return .failure(PathViolation("File is read-only and cannot be edited: \(path)"))
+        }
+        return .success(())
+    }
+
+    /// Check that a path may be used as a directory: if it exists, it must be one.
+    ///
+    /// A nonexistent path succeeds; an existing path that is not a directory (or
+    /// cannot be stat-ed) is rejected.
+    ///
+    /// - Parameter path: the resolved path to check.
+    /// - Returns: `.success` when a directory (or nonexistent), or `.failure`
+    ///   with a corrective ``PathViolation``.
+    private func checkDirectoryPermission(_ path: String) -> Result<Void, PathViolation> {
+        if fileExists(path), (Self.fileMode(path).map { ($0 & S_IFMT) != S_IFDIR }) ?? true {
+            return .failure(PathViolation("Path exists but is not a directory: \(path)"))
         }
         return .success(())
     }
@@ -505,6 +593,35 @@ public struct PathGuard: Sendable {
         }
     }
 
+    /// An "empty path" violation when a path is blank after trimming, else `nil`.
+    ///
+    /// Trims Unicode whitespace and newlines (matching the Rust `str::trim`)
+    /// before the emptiness test, so a path of only spaces or newlines is
+    /// rejected.
+    ///
+    /// - Parameter path: the raw path string to check.
+    /// - Returns: a corrective ``PathViolation``, or `nil` when non-empty.
+    private static func emptyViolation(_ path: String) -> PathViolation? {
+        guard path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return PathViolation("File path cannot be empty")
+    }
+
+    /// A "blocked pattern" violation when a path contains a blocked substring, else `nil`.
+    ///
+    /// Reports the first ``blockedPatterns`` substring found anywhere in the
+    /// path, catching directory-traversal and null-byte sequences before any
+    /// filesystem access.
+    ///
+    /// - Parameter path: the raw path string to scan.
+    /// - Returns: a corrective ``PathViolation`` naming the matched pattern, or
+    ///   `nil` when no blocked pattern is present.
+    private static func blockedPatternViolation(_ path: String) -> PathViolation? {
+        for pattern in blockedPatterns where path.contains(pattern) {
+            return PathViolation("Path contains blocked pattern '\(pattern)': \(path)")
+        }
+        return nil
+    }
+
     /// A "path too long" violation when a path exceeds ``maximumPathLength``, else `nil`.
     ///
     /// Length is measured in UTF-8 bytes, matching the Rust `str::len`.
@@ -547,6 +664,19 @@ public struct PathGuard: Sendable {
         let prefixComponents = components(prefix)
         guard prefixComponents.count <= pathComponents.count else { return false }
         return Array(pathComponents.prefix(prefixComponents.count)) == prefixComponents
+    }
+
+    /// A "control characters" violation when a path holds a disallowed control character, else `nil`.
+    ///
+    /// Wraps ``containsInvalidControlCharacter(_:)`` so the post-canonicalization
+    /// check composes uniformly with the other violation helpers.
+    ///
+    /// - Parameter path: the canonical path to scan.
+    /// - Returns: a corrective ``PathViolation``, or `nil` when no disallowed
+    ///   control character is present.
+    private static func controlCharacterViolation(_ path: String) -> PathViolation? {
+        guard containsInvalidControlCharacter(path) else { return nil }
+        return PathViolation("Path contains invalid control characters")
     }
 
     /// Whether a path contains a disallowed control character.
