@@ -44,6 +44,14 @@ public enum Hashline {
         return UInt8(crc32(Array(trimmed.utf8)) & 0xff)
     }
 
+    /// The number of hexadecimal digits an anchor's line-content hash occupies.
+    ///
+    /// The line hash is a single byte, so it renders as (and parses back from)
+    /// exactly two hex characters. ``renderHash(_:)`` pads to this width and
+    /// ``parseAnchor(_:)`` requires exactly this many hex digits, so the anchor
+    /// dialect's hash width is defined in one place.
+    private static let hashHexDigits = 2
+
     /// Render a hash byte as two lowercase hexadecimal characters.
     ///
     /// For example, `0xa3` renders as `"a3"` and `0x0f` as `"0f"`.
@@ -51,7 +59,7 @@ public enum Hashline {
     /// - Parameter hash: the hash byte to render.
     /// - Returns: two lowercase hexadecimal characters.
     public static func renderHash(_ hash: UInt8) -> String {
-        String(format: "%02x", hash)
+        String(format: "%0\(hashHexDigits)x", hash)
     }
 
     // MARK: Tagging
@@ -120,7 +128,7 @@ public enum Hashline {
         guard let colon = anchor.firstIndex(of: ":") else { return nil }
         let number = anchor[anchor.startIndex..<colon]
         let hex = anchor[anchor.index(after: colon)...]
-        guard !number.isEmpty, hex.count == 2 else { return nil }
+        guard !number.isEmpty, hex.count == hashHexDigits else { return nil }
         // Match Rust `usize::from_str`: allow one optional leading `+`, then a
         // non-empty ASCII digit run. `-`, whitespace, and non-digits are rejected.
         var digits = number
@@ -305,12 +313,12 @@ public enum Hashline {
     ///
     /// The reflected CRC-32 (`crc32fast`) both seeds the register with and XORs
     /// the final result against this value.
-    private static let crc32XorOut: UInt32 = 0xFFFF_FFFF
+    private static let crc32XOROut: UInt32 = 0xFFFF_FFFF
 
     /// The precomputed IEEE CRC-32 lookup table.
     ///
     /// Standard reflected CRC-32 (polynomial `0xEDB88320`, init/xorout
-    /// ``crc32XorOut``) — the algorithm `crc32fast` implements, so
+    /// ``crc32XOROut``) — the algorithm `crc32fast` implements, so
     /// ``hashLine(_:)`` matches the Rust crate bit-for-bit.
     private static let crc32Table: [UInt32] = (0..<256).map { index in
         var c = UInt32(index)
@@ -321,11 +329,11 @@ public enum Hashline {
     }
 
     private static func crc32(_ bytes: [UInt8]) -> UInt32 {
-        var crc = crc32XorOut
+        var crc = crc32XOROut
         for byte in bytes {
             let index = Int((crc ^ UInt32(byte)) & 0xff)
             crc = crc32Table[index] ^ (crc >> 8)
         }
-        return crc ^ crc32XorOut
+        return crc ^ crc32XOROut
     }
 }
