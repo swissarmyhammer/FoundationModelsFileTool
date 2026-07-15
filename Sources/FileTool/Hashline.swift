@@ -67,19 +67,19 @@ public enum Hashline {
     /// Annotate each line of `content` with a hashline anchor.
     ///
     /// Each line becomes `N:HH|line`, where `N` is the absolute 1-based line
-    /// number (the first line is `startLine`) and `HH` is ``renderHash(_:)`` of
-    /// ``hashLine(_:)``. Line endings present in `content` (`\n`, `\r\n`, `\r`,
-    /// or a mix) are preserved exactly.
+    /// number (the first line is `startingAtLine`) and `HH` is ``renderHash(_:)``
+    /// of ``hashLine(_:)``. Line endings present in `content` (`\n`, `\r\n`,
+    /// `\r`, or a mix) are preserved exactly.
     ///
     /// - Parameters:
     ///   - content: the raw file content, terminators intact.
-    ///   - startLine: the 1-based line number assigned to the first line.
+    ///   - startingAtLine: the 1-based line number assigned to the first line.
     /// - Returns: the tagged content as a single string.
-    public static func tag(lines content: String, startingAtLine startLine: Int) -> String {
+    public static func tag(lines content: String, startingAtLine: Int) -> String {
         var out = ""
         for (offset, line) in splitLines(content).enumerated() {
-            let n = startLine + offset
-            out += "\(n):\(renderHash(hashLine(line.text)))\(anchorTextDelimiter)\(line.text)\(line.terminator)"
+            let n = startingAtLine + offset
+            out += "\(n)\(anchorLineHashDelimiter)\(renderHash(hashLine(line.text)))\(anchorTextDelimiter)\(line.text)\(line.terminator)"
         }
         return out
     }
@@ -107,6 +107,12 @@ public enum Hashline {
     /// ``resolveAnchor(_:in:)`` so the dialect is defined in one place.
     private static let anchorTextDelimiter: Character = "|"
 
+    /// The delimiter separating an anchor's line number from its content hash in the `N:HH` head.
+    ///
+    /// Shared by ``tag(lines:startingAtLine:)`` and ``parseAnchor(_:)`` so the
+    /// dialect is defined in one place.
+    private static let anchorLineHashDelimiter: Character = ":"
+
     /// Parse a hashline anchor in the `N:HH` format.
     ///
     /// Returns the 1-based line number and hash. An optional `|text` suffix is
@@ -125,7 +131,7 @@ public enum Hashline {
         let anchor: Substring =
             anchorString.firstIndex(of: anchorTextDelimiter).map { anchorString[anchorString.startIndex..<$0] }
             ?? Substring(anchorString)
-        guard let colon = anchor.firstIndex(of: ":") else { return nil }
+        guard let colon = anchor.firstIndex(of: anchorLineHashDelimiter) else { return nil }
         let number = anchor[anchor.startIndex..<colon]
         let hex = anchor[anchor.index(after: colon)...]
         guard !number.isEmpty, hex.count == hashHexDigits else { return nil }

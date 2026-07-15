@@ -100,17 +100,60 @@ public struct ReadFile: Sendable {
 extension ReadFile {
     // MARK: Bounds
 
-    /// The smallest accepted ``offset`` (offsets are 1-based line numbers).
-    private static let minimumOffset = 1
+    /// A bounded integer parameter: its name, the kind of value it expects, and its inclusive range.
+    ///
+    /// Bound checking is data, not control flow: ``offsetBound`` and
+    /// ``limitBound`` are two instances of this one type, and ``violation(_:)``
+    /// is the single code path that validates a value and builds its corrective
+    /// message. There is no per-parameter validation function or message string
+    /// to keep in lockstep — a parameter's whole identity lives in its spec.
+    private struct BoundSpec {
+        /// The parameter name, as it appears in backticks in a corrective message (`offset`).
+        let parameterName: String
 
-    /// The largest accepted ``offset``, matching the Rust `files` tool's bound.
-    private static let maximumOffset = 1_000_000
+        /// The kind of value expected, as it reads in a corrective message (`1-based line number`).
+        let typeDescription: String
 
-    /// The smallest accepted ``limit`` (a window returns at least one line).
-    private static let minimumLimit = 1
+        /// The smallest acceptable value.
+        let minimum: Int
 
-    /// The largest accepted ``limit``, matching the Rust `files` tool's bound.
-    private static let maximumLimit = 100_000
+        /// The largest acceptable value.
+        let maximum: Int
+
+        /// The corrective message naming this parameter's valid, inclusive range.
+        var correctiveMessage: String {
+            "The `\(parameterName)` parameter must be a \(typeDescription) between \(minimum) and \(maximum)."
+        }
+
+        /// A corrective message when `value` is present and out of range, or `nil` when acceptable.
+        ///
+        /// An absent value is acceptable (the parameter was omitted); an in-range
+        /// value is acceptable; an out-of-range value yields ``correctiveMessage``.
+        ///
+        /// - Parameter value: the requested value, or `nil` when the parameter was omitted.
+        /// - Returns: ``correctiveMessage`` when `value` is present and out of
+        ///   range, else `nil`.
+        func violation(_ value: Int?) -> String? {
+            guard let value else { return nil }
+            return (minimum...maximum).contains(value) ? nil : correctiveMessage
+        }
+    }
+
+    /// The bound on ``offset``: a 1-based line number in `1 ... 1_000_000`, matching the Rust `files` tool.
+    private static let offsetBound = BoundSpec(
+        parameterName: "offset",
+        typeDescription: "1-based line number",
+        minimum: 1,
+        maximum: 1_000_000
+    )
+
+    /// The bound on ``limit``: a line count in `1 ... 100_000`, matching the Rust `files` tool.
+    private static let limitBound = BoundSpec(
+        parameterName: "limit",
+        typeDescription: "line count",
+        minimum: 1,
+        maximum: 100_000
+    )
 
     // MARK: Format names
 
@@ -170,8 +213,8 @@ extension ReadFile {
     /// - Returns: the windowed ``ReadOutput/content(_:)`` on success, or a
     ///   ``ReadOutput/corrective(_:)`` message the model can act on.
     public func execute(in context: FileContext) async throws -> ReadOutput {
-        if let message = Self.offsetViolation(offset) { return .corrective(message) }
-        if let message = Self.limitViolation(limit) { return .corrective(message) }
+        if let message = Self.offsetBound.violation(offset) { return .corrective(message) }
+        if let message = Self.limitBound.violation(limit) { return .corrective(message) }
         guard let resolvedFormat = Self.resolveFormat(format) else {
             return .corrective(Self.unknownFormatMessage)
         }
@@ -188,56 +231,18 @@ extension ReadFile {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            return .corrective(Self.unreadableMessage(path: path))
+            return .corrective(Self.pathErrorMessage(Self.unreadableDescription, path: path))
         }
 
         guard let content = String(data: data, encoding: .utf8) else {
-            return .corrective(Self.binaryMessage(path: path))
+            return .corrective(Self.pathErrorMessage(Self.binaryDescription, path: path))
         }
 
         let hash = Hashline.wholeFileHash(bytes: data)
         return .content(Self.window(content: content, hash: hash, offset: offset, limit: limit, format: resolvedFormat))
     }
 
-    // MARK: Bound validation
-
-    /// A corrective message when `value` falls outside `min ... max`, or `nil` when acceptable.
-    ///
-    /// The single bound check behind ``offsetViolation(_:)`` and
-    /// ``limitViolation(_:)``: an absent value is acceptable (the parameter was
-    /// omitted), an in-range value is acceptable, and an out-of-range value
-    /// yields the supplied corrective `message` naming the valid range.
-    ///
-    /// - Parameters:
-    ///   - value: the requested value, or `nil` when the parameter was omitted.
-    ///   - min: the smallest acceptable value.
-    ///   - max: the largest acceptable value.
-    ///   - message: the corrective message returned when `value` is out of range.
-    /// - Returns: `message` when `value` is present and out of range, else `nil`.
-    private static func boundViolation(_ value: Int?, min: Int, max: Int, message: String) -> String? {
-        guard let value else { return nil }
-        return (min...max).contains(value) ? nil : message
-    }
-
-    /// A corrective message when ``offset`` is out of bounds, or `nil` when acceptable.
-    ///
-    /// An absent offset is acceptable (the read starts at the first line).
-    ///
-    /// - Parameter offset: the requested 1-based start line, or `nil`.
-    /// - Returns: a corrective message naming the valid range, or `nil`.
-    private static func offsetViolation(_ offset: Int?) -> String? {
-        boundViolation(offset, min: minimumOffset, max: maximumOffset, message: offsetBoundsMessage)
-    }
-
-    /// A corrective message when ``limit`` is out of bounds, or `nil` when acceptable.
-    ///
-    /// An absent limit is acceptable (the read runs to the end of the file).
-    ///
-    /// - Parameter limit: the requested maximum line count, or `nil`.
-    /// - Returns: a corrective message naming the valid range, or `nil`.
-    private static func limitViolation(_ limit: Int?) -> String? {
-        boundViolation(limit, min: minimumLimit, max: maximumLimit, message: limitBoundsMessage)
-    }
+    // MARK: Format resolution
 
     /// Resolves the requested format name to a ``ReadFormat``, or `nil` when unknown.
     ///
@@ -314,53 +319,31 @@ extension ReadFile {
 
     // MARK: Corrective messages
 
-    /// The corrective message telling the model the valid range for a bounded parameter.
-    ///
-    /// The single message template behind ``offsetBoundsMessage`` and
-    /// ``limitBoundsMessage``: it names the offending parameter, describes the
-    /// kind of value it expects, and states the inclusive range, so the two
-    /// bound messages cannot drift apart in wording.
-    ///
-    /// - Parameters:
-    ///   - paramName: the parameter name, as it appears in backticks (`offset`).
-    ///   - typeDescription: the kind of value expected (for example
-    ///     `1-based line number`).
-    ///   - min: the smallest acceptable value.
-    ///   - max: the largest acceptable value.
-    /// - Returns: the corrective message naming the valid range.
-    private static func boundViolationMessage(paramName: String, typeDescription: String, min: Int, max: Int) -> String {
-        "The `\(paramName)` parameter must be a \(typeDescription) between \(min) and \(max)."
-    }
-
-    /// The corrective message naming the valid ``offset`` range.
-    private static var offsetBoundsMessage: String {
-        boundViolationMessage(paramName: "offset", typeDescription: "1-based line number", min: minimumOffset, max: maximumOffset)
-    }
-
-    /// The corrective message naming the valid ``limit`` range.
-    private static var limitBoundsMessage: String {
-        boundViolationMessage(paramName: "limit", typeDescription: "line count", min: minimumLimit, max: maximumLimit)
-    }
-
     /// The corrective message naming the valid ``format`` values.
     private static var unknownFormatMessage: String {
         "The `format` parameter must be one of: \(hashlineFormatName), \(plainFormatName)."
     }
 
-    /// The corrective message for a path that exists in bounds but cannot be read.
-    ///
-    /// - Parameter path: the requested path.
-    /// - Returns: the corrective message.
-    private static func unreadableMessage(path: String) -> String {
-        "The file could not be read: \(path)"
-    }
+    /// The description of a path that exists in bounds but cannot be read, before the `: path` suffix.
+    private static let unreadableDescription = "The file could not be read"
 
-    /// The corrective message for a non-UTF-8 (binary) file, which is never decoded.
+    /// The description of a non-UTF-8 (binary) file, which is never decoded, before the `: path` suffix.
+    private static let binaryDescription =
+        "The file is not valid UTF-8 text and appears to be binary, so it cannot be read as text"
+
+    /// A corrective message for a failed path, formatted as `<description>: <path>`.
     ///
-    /// - Parameter path: the requested path.
+    /// The single template behind the unreadable-path and binary-file messages:
+    /// the two conditions differ only by ``unreadableDescription`` versus
+    /// ``binaryDescription``, so the shared `<description>: <path>` shape lives in
+    /// one place and cannot drift between them.
+    ///
+    /// - Parameters:
+    ///   - description: the leading description of what went wrong.
+    ///   - path: the requested path.
     /// - Returns: the corrective message.
-    private static func binaryMessage(path: String) -> String {
-        "The file is not valid UTF-8 text and appears to be binary, so it cannot be read as text: \(path)"
+    private static func pathErrorMessage(_ description: String, path: String) -> String {
+        "\(description): \(path)"
     }
 
     /// The window note for a window that begins past the end of the file.
