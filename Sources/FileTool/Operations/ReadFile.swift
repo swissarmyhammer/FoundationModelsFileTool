@@ -320,8 +320,13 @@ extension ReadFile {
     // MARK: Corrective messages
 
     /// The corrective message naming the valid ``format`` values.
+    ///
+    /// The valid names are derived from the authoritative ``formatMap`` keys, so
+    /// the message cannot drift out of step with the set of formats the
+    /// operation actually accepts; adding a format requires editing only the map.
     private static var unknownFormatMessage: String {
-        "The `format` parameter must be one of: \(hashlineFormatName), \(plainFormatName)."
+        let names = formatMap.keys.sorted().joined(separator: ", ")
+        return "The `format` parameter must be one of: \(names)."
     }
 
     /// The description of a path that exists in bounds but cannot be read, before the `: path` suffix.

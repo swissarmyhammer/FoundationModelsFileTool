@@ -225,8 +225,7 @@ import Testing
         let output = try await Self.makeOperation(path: path, format: "xml").execute(in: context)
         let message = try #require(output.correctiveValue)
 
-        #expect(message.contains("hashline"))
-        #expect(message.contains("plain"))
+        #expect(message == "The `format` parameter must be one of: hashline, plain.")
     }
 
     // MARK: Binary rejection
