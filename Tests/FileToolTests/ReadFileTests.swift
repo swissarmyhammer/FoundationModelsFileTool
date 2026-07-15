@@ -14,20 +14,6 @@ import Testing
 @Suite struct ReadFileTests {
     // MARK: Test scaffolding
 
-    /// Create a fresh, empty temporary directory and return its URL.
-    ///
-    /// The directory is created under the process temporary directory with a
-    /// unique name so tests never collide; the operating system reclaims the
-    /// temporary tree regardless of per-test cleanup.
-    ///
-    /// - Returns: the URL of the freshly created temporary directory.
-    private static func makeTemporaryDirectory() -> URL {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ReadFileTests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
-
     /// Write `data` to a file named `name` inside a fresh temporary directory.
     ///
     /// - Parameters:
@@ -39,7 +25,7 @@ import Testing
         writing data: Data,
         named name: String = "sample.txt"
     ) throws -> (context: FileContext, path: String) {
-        let root = makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "ReadFileTests")
         let fileURL = root.appendingPathComponent(name, isDirectory: false)
         try data.write(to: fileURL)
         return (FileContext(root: root), fileURL.path)
@@ -300,7 +286,7 @@ import Testing
     // MARK: Missing path
 
     @Test func missingPathIsCorrective() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "ReadFileTests")
         let missing = root.appendingPathComponent("does-not-exist.txt", isDirectory: false)
         let context = FileContext(root: root)
         let output = try await Self.makeOperation(path: missing.path).execute(in: context)

@@ -20,20 +20,6 @@ import Testing
     /// The content-size cap in bytes, matching ``WriteFile``'s cap (10 MiB).
     private static let contentByteCap = 10 * 1024 * 1024
 
-    /// Create a fresh, empty temporary directory and return its URL.
-    ///
-    /// The directory is created under the process temporary directory with a
-    /// unique name so tests never collide; the operating system reclaims the
-    /// temporary tree regardless of per-test cleanup.
-    ///
-    /// - Returns: the URL of the freshly created temporary directory.
-    private static func makeTemporaryDirectory() -> URL {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("WriteFileTests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
-
     /// Build a ``WriteFile`` operation from its parameter payload.
     ///
     /// - Parameters:
@@ -80,7 +66,7 @@ import Testing
     // MARK: New and overwrite
 
     @Test func writesANewFile() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let path = root.appendingPathComponent("new.txt", isDirectory: false).path
         let context = FileContext(root: root)
 
@@ -92,7 +78,7 @@ import Testing
     }
 
     @Test func overwritesAnExistingFile() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("existing.txt", isDirectory: false)
         try Data("stale contents that are longer\n".utf8).write(to: url)
         let context = FileContext(root: root)
@@ -107,7 +93,7 @@ import Testing
     // MARK: Blank path
 
     @Test func blankPathIsCorrective() async throws {
-        let context = FileContext(root: Self.makeTemporaryDirectory())
+        let context = FileContext(root: TestSupport.makeTemporaryDirectory(named: "WriteFileTests"))
         let output = try await Self.makeOperation(filePath: "   ", content: "x").execute(in: context)
         let message = try #require(output.correctiveValue)
 
@@ -117,7 +103,7 @@ import Testing
     // MARK: Content-size cap
 
     @Test func contentOneByteOverCapIsCorrective() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let path = root.appendingPathComponent("big.txt", isDirectory: false).path
         let context = FileContext(root: root)
         let oversized = String(repeating: "a", count: Self.contentByteCap + 1)
@@ -130,7 +116,7 @@ import Testing
     }
 
     @Test func contentExactlyAtCapIsAccepted() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let path = root.appendingPathComponent("atcap.txt", isDirectory: false).path
         let context = FileContext(root: root)
         let atCap = String(repeating: "a", count: Self.contentByteCap)
@@ -144,7 +130,7 @@ import Testing
     // MARK: Read-only target
 
     @Test func readOnlyTargetIsCorrectiveAndLeavesItUntouched() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("locked.txt", isDirectory: false)
         try Data("original\n".utf8).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url.path)
@@ -160,7 +146,7 @@ import Testing
     // MARK: Cleanup on failure
 
     @Test func renameFailureWhenTargetIsADirectoryIsCorrectiveAndLeavesNoTempFiles() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let directoryTarget = root.appendingPathComponent("target-dir", isDirectory: true)
         try FileManager.default.createDirectory(at: directoryTarget, withIntermediateDirectories: true)
         let context = FileContext(root: root)
@@ -176,7 +162,7 @@ import Testing
     }
 
     @Test func writeFailureIntoAReadOnlyDirectoryIsCorrectiveAndLeavesNoTempFiles() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let readOnlyDirectory = root.appendingPathComponent("read-only", isDirectory: true)
         try FileManager.default.createDirectory(at: readOnlyDirectory, withIntermediateDirectories: true)
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: readOnlyDirectory.path)
@@ -195,7 +181,7 @@ import Testing
     // MARK: Unicode and empty content
 
     @Test func unicodeContentRoundTripsOnDisk() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("unicode.txt", isDirectory: false)
         let text = "h\u{00E9}llo \u{1F30D}\n\u{0441}\u{0432}\u{0456}\u{0442}\n"
         let context = FileContext(root: root)
@@ -208,7 +194,7 @@ import Testing
     }
 
     @Test func emptyContentWritesAnEmptyFile() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("empty.txt", isDirectory: false)
         let context = FileContext(root: root)
 
@@ -224,7 +210,7 @@ import Testing
     // MARK: Permission preservation
 
     @Test func overwritingPreservesExecutablePermissionBits() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("script.sh", isDirectory: false)
         try Data("#!/bin/sh\necho old\n".utf8).write(to: url)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
@@ -239,7 +225,7 @@ import Testing
     // MARK: Envelope fields
 
     @Test func envelopeBytesWrittenCountsUTF8Bytes() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("bytes.txt", isDirectory: false)
         // A multi-byte scalar makes byte count differ from character count.
         let text = "a\u{1F30D}b"
@@ -253,7 +239,7 @@ import Testing
     }
 
     @Test func envelopeHashEqualsASubsequentReadToken() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("hash.txt", isDirectory: false)
         let text = "alpha\nbeta\ngamma\n"
         let context = FileContext(root: root)
@@ -270,7 +256,7 @@ import Testing
     }
 
     @Test func envelopeTaggedContentEqualsSubsequentReadBackTagging() async throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "WriteFileTests")
         let url = root.appendingPathComponent("tagged.txt", isDirectory: false)
         let text = "first line\nsecond line\nthird line\n"
         let context = FileContext(root: root)

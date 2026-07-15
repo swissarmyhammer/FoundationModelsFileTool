@@ -16,18 +16,6 @@ import Testing
 @Suite struct PathGuardTests {
     // MARK: Temp-directory helpers
 
-    /// Create a fresh, empty temporary directory and return its URL.
-    ///
-    /// The directory is created under the process temp directory with a unique
-    /// name. Tests are responsible for their own cleanup where it matters; the
-    /// OS reclaims the temp tree regardless.
-    private static func makeTemporaryDirectory() -> URL {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PathGuardTests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
-
     /// The unique final directory-name component of a temporary directory.
     ///
     /// macOS routes the temp directory through the `/var` -> `/private/var`
@@ -113,7 +101,7 @@ import Testing
         // A control character other than tab / newline / carriage return is
         // rejected. The parent (the temp dir) exists so validation reaches the
         // control-character gate rather than failing on a missing parent first.
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: directory)
         let result = guardUnderTest.validatePath(directory.path + "/foo\u{07}bar")
         #expect(throws: PathViolation.self) { try result.get() }
@@ -125,7 +113,7 @@ import Testing
     // MARK: Session-root (never CWD) relative resolution
 
     @Test func resolvesRelativePathAgainstSessionRootNotProcessDirectory() throws {
-        let sessionRoot = Self.makeTemporaryDirectory()
+        let sessionRoot = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let file = sessionRoot.appendingPathComponent("relative.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
 
@@ -139,7 +127,7 @@ import Testing
     }
 
     @Test func resolvesNestedRelativePathAgainstSessionRoot() throws {
-        let sessionRoot = Self.makeTemporaryDirectory()
+        let sessionRoot = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let nested = sessionRoot.appendingPathComponent("nested", isDirectory: true)
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         try "content".write(to: nested.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
@@ -155,7 +143,7 @@ import Testing
     @Test func rejectsSymlinkBeforeCanonicalizationByDefault() throws {
         // The symlink target does NOT exist: canonicalization would fail, so a
         // rejection here proves the symlink is refused BEFORE canonicalization.
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let link = directory.appendingPathComponent("dangling.txt")
         let target = directory.appendingPathComponent("does-not-exist.txt")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
@@ -169,7 +157,7 @@ import Testing
     }
 
     @Test func acceptsSymlinkWhenOptedIn() throws {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let target = directory.appendingPathComponent("target.txt")
         try "content".write(to: target, atomically: true, encoding: .utf8)
         let link = directory.appendingPathComponent("link.txt")
@@ -189,7 +177,7 @@ import Testing
         // `resolve_symlink_securely`, which re-canonicalizes and fails on a
         // dangling link. The symlink lives inside the workspace, so only this
         // re-resolution step — not the boundary check — can catch it.
-        let workspace = Self.makeTemporaryDirectory()
+        let workspace = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let link = workspace.appendingPathComponent("dangling.txt")
         let target = workspace.appendingPathComponent("nowhere/evil.txt")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
@@ -205,7 +193,7 @@ import Testing
     // MARK: Workspace-boundary enforcement
 
     @Test func acceptsNonexistentTargetInsideWorkspace() throws {
-        let workspace = Self.makeTemporaryDirectory()
+        let workspace = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: workspace, workspaceRoot: workspace)
         // A not-yet-created write target directly under the workspace passes.
         let target = workspace.appendingPathComponent("new-file.txt")
@@ -214,7 +202,7 @@ import Testing
     }
 
     @Test func acceptsNonexistentTargetViaDeepestExistingParentInsideWorkspace() throws {
-        let workspace = Self.makeTemporaryDirectory()
+        let workspace = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         // The subdirectory exists but the target file does not, so the boundary
         // check reconstructs the target from its deepest existing parent (the
         // subdirectory) and confirms the reconstructed path is inside.
@@ -228,8 +216,8 @@ import Testing
     }
 
     @Test func rejectsExistingTargetOutsideWorkspace() throws {
-        let workspace = Self.makeTemporaryDirectory()
-        let outside = Self.makeTemporaryDirectory()
+        let workspace = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let outside = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let outsideFile = outside.appendingPathComponent("secret.txt")
         try "secret".write(to: outsideFile, atomically: true, encoding: .utf8)
 
@@ -242,8 +230,8 @@ import Testing
     }
 
     @Test func rejectsNonexistentTargetOutsideWorkspaceViaDeepestExistingParent() throws {
-        let workspace = Self.makeTemporaryDirectory()
-        let outside = Self.makeTemporaryDirectory()
+        let workspace = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let outside = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         // The subdirectory exists but the target file does not, so the boundary
         // check reconstructs the target from its deepest existing parent (the
         // outside subdirectory) and rejects it for being outside the workspace.
@@ -269,7 +257,7 @@ import Testing
     }
 
     @Test func acceptsNormalDirectoryAsSearchRoot() {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: directory)
         let result = guardUnderTest.rejectFilesystemRoot(directory.path)
         #expect((try? result.get()) != nil)
@@ -278,7 +266,7 @@ import Testing
     // MARK: Per-operation permission checks
 
     @Test func rejectsReadOfDirectoryAsNonRegularFile() {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: directory)
         let result = guardUnderTest.checkPermission(directory, for: .read)
         #expect(throws: PathViolation.self) { try result.get() }
@@ -288,7 +276,7 @@ import Testing
     }
 
     @Test func rejectsReadOfUnreadableFile() throws {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let file = directory.appendingPathComponent("noread.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
@@ -303,7 +291,7 @@ import Testing
     }
 
     @Test func rejectsWriteOfReadonlyFile() throws {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let file = directory.appendingPathComponent("readonly.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: file.path)
@@ -318,7 +306,7 @@ import Testing
     }
 
     @Test func rejectsWriteWithMissingParentDirectory() {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: directory)
         let target = directory.appendingPathComponent("missing-parent/file.txt")
         let result = guardUnderTest.checkPermission(target, for: .write)
@@ -329,7 +317,7 @@ import Testing
     }
 
     @Test func rejectsEditOfNonexistentFile() {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let guardUnderTest = PathGuard(root: directory)
         let target = directory.appendingPathComponent("nope.txt")
         let result = guardUnderTest.checkPermission(target, for: .edit)
@@ -340,7 +328,7 @@ import Testing
     }
 
     @Test func rejectsEditOfReadonlyFile() throws {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let file = directory.appendingPathComponent("readonly.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: file.path)
@@ -356,7 +344,7 @@ import Testing
 
     @Test(arguments: [FileOperation.read, .write, .edit])
     func acceptsWritableRegularFileForEveryOperation(operation: FileOperation) throws {
-        let directory = Self.makeTemporaryDirectory()
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let file = directory.appendingPathComponent("ok.txt")
         try "content".write(to: file, atomically: true, encoding: .utf8)
 
@@ -368,7 +356,7 @@ import Testing
     // MARK: FileContext
 
     @Test func fileContextExposesRootGuardAndReadOnlyFlag() {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
         let context = FileContext(root: root, readOnly: true)
         #expect(context.root == root)
         #expect(context.readOnly)
@@ -377,7 +365,7 @@ import Testing
     }
 
     @Test func fileContextDefaultsToReadWrite() {
-        let context = FileContext(root: Self.makeTemporaryDirectory())
+        let context = FileContext(root: TestSupport.makeTemporaryDirectory(named: "PathGuardTests"))
         #expect(!context.readOnly)
     }
 }

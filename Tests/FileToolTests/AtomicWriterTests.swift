@@ -12,22 +12,10 @@ import Testing
 /// The operation-level atomicity, cleanup, and permission-preservation
 /// behaviors are exercised through the operation in ``WriteFileTests``.
 @Suite struct AtomicWriterTests {
-    // MARK: Test scaffolding
-
-    /// Create a fresh, empty temporary directory and return its URL.
-    ///
-    /// - Returns: the URL of the freshly created temporary directory.
-    private static func makeTemporaryDirectory() -> URL {
-        let base = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AtomicWriterTests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
-
     // MARK: Parent-directory creation
 
     @Test func writeCreatesMissingParentDirectories() throws {
-        let root = Self.makeTemporaryDirectory()
+        let root = TestSupport.makeTemporaryDirectory(named: "AtomicWriterTests")
         let target = root
             .appendingPathComponent("deep", isDirectory: true)
             .appendingPathComponent("nested", isDirectory: true)
