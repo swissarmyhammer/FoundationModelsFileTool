@@ -46,35 +46,23 @@ public struct GlobResult: Encodable, Sendable {
 /// message the model reads and acts on within the turn, never thrown. Throwing
 /// from an operation's `execute(in:)` is fatal to the turn, so every recoverable
 /// condition returns a value instead.
-public enum GlobOutput: Encodable, Sendable {
+public enum GlobOutput: CorrectiveEncodable, Sendable {
     /// A successful glob carrying the ``GlobResult``.
     case content(GlobResult)
 
     /// A recoverable failure carrying a corrective message for the model.
     case corrective(String)
 
-    /// The coding keys for the ``corrective(_:)`` encoding.
-    private enum CodingKeys: String, CodingKey {
-        /// The corrective-message field.
-        case corrective
+    /// The successful ``GlobResult`` (encoded inline), or `nil` for a corrective outcome.
+    public var successResult: GlobResult? {
+        if case .content(let result) = self { return result }
+        return nil
     }
 
-    /// Encodes the outcome.
-    ///
-    /// A ``content(_:)`` outcome encodes the ``GlobResult`` inline (its
-    /// `pattern`, `files`, `total`, and `capped` fields); a ``corrective(_:)``
-    /// outcome encodes a single `corrective` field carrying the message.
-    ///
-    /// - Parameter encoder: the encoder to write the outcome into.
-    /// - Throws: An error if the encoder fails to encode a value.
-    public func encode(to encoder: Encoder) throws {
-        switch self {
-        case .content(let result):
-            try result.encode(to: encoder)
-        case .corrective(let message):
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(message, forKey: .corrective)
-        }
+    /// The corrective message, or `nil` for a successful outcome.
+    public var correctiveMessage: String? {
+        if case .corrective(let message) = self { return message }
+        return nil
     }
 }
 
@@ -190,27 +178,13 @@ public struct GlobEngine: Sendable {
     /// - Returns: `.success` with the canonical search-root URL, or `.failure`
     ///   with a corrective ``PathViolation``.
     private static func resolveSearchRoot(path: String?, in context: FileContext) -> Result<URL, PathViolation> {
-        let resolved: URL
-        if let path {
-            switch context.pathGuard.validate(path, for: .directory) {
-            case .success(let url):
-                resolved = url
-            case .failure(let violation):
-                return .failure(violation)
+        FileWalker.resolveRequestedPath(path, in: context) { context.pathGuard.validate($0, for: .directory) }
+            .flatMap { resolved in FileWalker.boundDirectory(resolved, in: context) }
+            .flatMap { canonical in
+                FileWalker.isDirectory(canonical.path)
+                    ? .success(canonical)
+                    : .failure(PathViolation(directoryMissingMessage(path ?? canonical.path)))
             }
-        } else {
-            resolved = context.root
-        }
-
-        if case .failure(let violation) = context.pathGuard.rejectFilesystemRoot(resolved.path) {
-            return .failure(violation)
-        }
-
-        let canonical = FileWalker.canonicalDirectory(resolved)
-        guard FileWalker.isDirectory(canonical.path) else {
-            return .failure(PathViolation(directoryMissingMessage(path ?? canonical.path)))
-        }
-        return .success(canonical)
     }
 
     // MARK: Matching
@@ -246,14 +220,18 @@ public struct GlobEngine: Sendable {
         walkRoot: URL,
         sessionRoot: URL
     ) -> [Match] {
-        var matches: [Match] = []
-        for absolute in FileWalker.collectFiles(walkRoot: walkRoot, respectGitIgnore: respectGitIgnore) {
-            guard let relativeToWalk = FileWalker.relativePath(ofAbsolute: absolute, under: walkRoot.path) else { continue }
-            guard compiled.matches(relativePath: relativeToWalk, caseSensitive: caseSensitive) else { continue }
-            guard let relativeToSession = FileWalker.relativePath(ofAbsolute: absolute, under: sessionRoot.path) else { continue }
-            guard let date = modificationDate(ofAbsolute: absolute) else { continue }
-            matches.append(Match(relativePath: relativeToSession, modificationDate: date))
-        }
+        var matches = FileWalker.walkAndFilter(
+            walkRoot: walkRoot,
+            sessionRoot: sessionRoot,
+            respectGitIgnore: respectGitIgnore,
+            accept: { _, relativeToWalk in
+                compiled.matches(relativePath: relativeToWalk, caseSensitive: caseSensitive)
+            },
+            build: { absolute, relativeToSession -> Match? in
+                guard let date = modificationDate(ofAbsolute: absolute) else { return nil }
+                return Match(relativePath: relativeToSession, modificationDate: date)
+            }
+        )
         matches.sort { lhs, rhs in
             lhs.modificationDate == rhs.modificationDate
                 ? lhs.relativePath < rhs.relativePath
@@ -558,29 +536,76 @@ struct GlobPattern {
     ///   - caseSensitive: whether matching is case-sensitive.
     /// - Returns: `true` when the tokens match the characters exactly.
     private static func segmentMatches(_ tokens: [Token], _ characters: [Character], caseSensitive: Bool) -> Bool {
-        func match(_ tokenIndex: Int, _ characterIndex: Int) -> Bool {
-            guard tokenIndex < tokens.count else { return characterIndex == characters.count }
-            switch tokens[tokenIndex] {
-            case .anyRun:
-                var next = characterIndex
-                while true {
-                    if match(tokenIndex + 1, next) { return true }
-                    guard next < characters.count else { return false }
-                    next += 1
-                }
-            case .singleCharacter:
-                return characterIndex < characters.count && match(tokenIndex + 1, characterIndex + 1)
-            case .literal(let expected):
-                return characterIndex < characters.count
-                    && charactersEqual(expected, characters[characterIndex], caseSensitive: caseSensitive)
-                    && match(tokenIndex + 1, characterIndex + 1)
-            case .characterClass(let characterClass):
-                return characterIndex < characters.count
-                    && characterClass.contains(characters[characterIndex], caseSensitive: caseSensitive)
-                    && match(tokenIndex + 1, characterIndex + 1)
-            }
+        segmentMatch(tokens, characters, tokenIndex: 0, characterIndex: 0, caseSensitive: caseSensitive)
+    }
+
+    /// Whether the tokens from `tokenIndex` match the characters from `characterIndex`.
+    ///
+    /// The recursive core of ``segmentMatches(_:_:caseSensitive:)``: a `*` run
+    /// delegates its backtracking to ``tryAnyRunMatch(_:_:tokenIndex:characterIndex:caseSensitive:)``,
+    /// while `?`, a literal, and a character class each consume exactly one
+    /// character before recursing on the remaining tokens.
+    ///
+    /// - Parameters:
+    ///   - tokens: the compiled tokens of one pattern component.
+    ///   - characters: the candidate component's characters.
+    ///   - tokenIndex: the index of the token to match next.
+    ///   - characterIndex: the index of the character to match next.
+    ///   - caseSensitive: whether matching is case-sensitive.
+    /// - Returns: `true` when the remaining tokens match the remaining characters exactly.
+    private static func segmentMatch(
+        _ tokens: [Token],
+        _ characters: [Character],
+        tokenIndex: Int,
+        characterIndex: Int,
+        caseSensitive: Bool
+    ) -> Bool {
+        guard tokenIndex < tokens.count else { return characterIndex == characters.count }
+        switch tokens[tokenIndex] {
+        case .anyRun:
+            return tryAnyRunMatch(tokens, characters, tokenIndex: tokenIndex, characterIndex: characterIndex, caseSensitive: caseSensitive)
+        case .singleCharacter:
+            return characterIndex < characters.count
+                && segmentMatch(tokens, characters, tokenIndex: tokenIndex + 1, characterIndex: characterIndex + 1, caseSensitive: caseSensitive)
+        case .literal(let expected):
+            return characterIndex < characters.count
+                && charactersEqual(expected, characters[characterIndex], caseSensitive: caseSensitive)
+                && segmentMatch(tokens, characters, tokenIndex: tokenIndex + 1, characterIndex: characterIndex + 1, caseSensitive: caseSensitive)
+        case .characterClass(let characterClass):
+            return characterIndex < characters.count
+                && characterClass.contains(characters[characterIndex], caseSensitive: caseSensitive)
+                && segmentMatch(tokens, characters, tokenIndex: tokenIndex + 1, characterIndex: characterIndex + 1, caseSensitive: caseSensitive)
         }
-        return match(0, 0)
+    }
+
+    /// Whether a `*` run at `tokenIndex` followed by the rest matches from `characterIndex`.
+    ///
+    /// A `*` matches any run of characters within the component, so this tries
+    /// the tokens after the `*` against every position from `characterIndex` to
+    /// the end of the component, succeeding as soon as one matches. Extracting
+    /// this backtracking loop keeps ``segmentMatch(_:_:tokenIndex:characterIndex:caseSensitive:)``
+    /// shallow rather than nesting the loop inside its `switch`.
+    ///
+    /// - Parameters:
+    ///   - tokens: the compiled tokens of one pattern component.
+    ///   - characters: the candidate component's characters.
+    ///   - tokenIndex: the index of the `*` run token.
+    ///   - characterIndex: the earliest character index the run may start consuming from.
+    ///   - caseSensitive: whether matching is case-sensitive.
+    /// - Returns: `true` when the tokens after the `*` match some suffix from `characterIndex`.
+    private static func tryAnyRunMatch(
+        _ tokens: [Token],
+        _ characters: [Character],
+        tokenIndex: Int,
+        characterIndex: Int,
+        caseSensitive: Bool
+    ) -> Bool {
+        var next = characterIndex
+        while true {
+            if segmentMatch(tokens, characters, tokenIndex: tokenIndex + 1, characterIndex: next, caseSensitive: caseSensitive) { return true }
+            guard next < characters.count else { return false }
+            next += 1
+        }
     }
 
     // MARK: Compilation

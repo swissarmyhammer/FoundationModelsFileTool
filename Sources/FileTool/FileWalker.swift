@@ -1,17 +1,29 @@
 import Darwin
 import Foundation
 
-/// The shared, git-aware filesystem walk behind both ``GlobEngine`` and ``GrepEngine``.
+/// The shared search-root resolution and git-aware walk behind both ``GlobEngine`` and ``GrepEngine``.
 ///
-/// Both engines enumerate the candidate files under a search root the same way:
-/// when a repository is present and its ignore rules are being honored, the
-/// git-aware listing (`git ls-files --cached --others --exclude-standard`) is
-/// used so ignored files — and, crucially, whole ignored directories such as a
-/// `build/` tree — are never descended into; otherwise a plain `FileManager`
-/// walk is used. Sharing that walk in one place keeps the two engines byte
-/// identical and means the "unscoped grep never touches the ignored `build/`
-/// directory" fix and the firmlink-aware ``canonicalDirectory(_:)`` resolution
-/// live in exactly one implementation rather than being copy-pasted.
+/// Both engines resolve, bound, and enumerate a search root the same way, so the
+/// steps they share live here once rather than being copy-pasted:
+///
+/// - **Root resolution** — ``resolveRequestedPath(_:in:validate:)`` turns a
+///   requested `path` (or the session root, when absent) into a validated URL,
+///   and ``boundDirectory(_:in:)`` refuses the filesystem root before returning
+///   a canonical directory URL.
+/// - **Enumeration** — when a repository is present and its ignore rules are
+///   being honored, the git-aware listing (`git ls-files --cached --others
+///   --exclude-standard`) is used so ignored files — and, crucially, whole
+///   ignored directories such as a `build/` tree — are never descended into;
+///   otherwise a plain `FileManager` walk is used.
+/// - **Collect-filter-assemble** — ``walkAndFilter(walkRoot:sessionRoot:respectGitIgnore:accept:build:)``
+///   is the single loop that enumerates, computes relative paths, applies a
+///   caller-supplied acceptance predicate, and builds a caller-supplied result
+///   type, so neither engine hand-rolls that loop.
+///
+/// Sharing all of this in one place keeps the two engines byte identical and
+/// means the "unscoped grep never touches the ignored `build/` directory" fix
+/// and the firmlink-aware ``canonicalDirectory(_:)`` resolution live in exactly
+/// one implementation.
 ///
 /// The type is a pure namespace of stateless static helpers; it holds no state
 /// and is never instantiated.
@@ -35,6 +47,47 @@ enum FileWalker {
             return relativePaths.map { walkRoot.path + "/" + $0 }
         }
         return enumeratedRegularFiles(under: walkRoot)
+    }
+
+    /// Walks the files under a root, keeps those the predicate accepts, and builds a result for each.
+    ///
+    /// Enumerates the candidate files under `walkRoot` via
+    /// ``collectFiles(walkRoot:respectGitIgnore:)``, computes each file's path
+    /// relative to the walk root (skipping any that fall outside it), offers that
+    /// pair to `accept`, and — for the accepted files — computes the path
+    /// relative to `sessionRoot` and hands both to `build`, collecting the
+    /// non-`nil` results in enumeration order. `build` may return `nil` to drop a
+    /// file (for example when an attribute it needs cannot be read).
+    ///
+    /// This is the single collect-filter-assemble loop both engines share: the
+    /// enumeration, the two relative-path computations, and the skip-on-outside
+    /// bookkeeping live here once, while each engine supplies its own acceptance
+    /// predicate and its own result type through the closures.
+    ///
+    /// - Parameters:
+    ///   - walkRoot: the canonical directory to enumerate.
+    ///   - sessionRoot: the canonical session root the built results are relative to.
+    ///   - respectGitIgnore: whether a present repository's ignore rules are honored.
+    ///   - accept: whether to keep a file, given its absolute path and its walk-relative path.
+    ///   - build: builds a result from a kept file's absolute path and its
+    ///     session-relative path, or `nil` to drop it.
+    /// - Returns: the built results, in enumeration order.
+    static func walkAndFilter<Element>(
+        walkRoot: URL,
+        sessionRoot: URL,
+        respectGitIgnore: Bool,
+        accept: (_ absolutePath: String, _ walkRelativePath: String) -> Bool,
+        build: (_ absolutePath: String, _ sessionRelativePath: String) -> Element?
+    ) -> [Element] {
+        var results: [Element] = []
+        for absolute in collectFiles(walkRoot: walkRoot, respectGitIgnore: respectGitIgnore) {
+            guard let relativeToWalk = relativePath(ofAbsolute: absolute, under: walkRoot.path) else { continue }
+            guard accept(absolute, relativeToWalk) else { continue }
+            guard let relativeToSession = relativePath(ofAbsolute: absolute, under: sessionRoot.path) else { continue }
+            guard let element = build(absolute, relativeToSession) else { continue }
+            results.append(element)
+        }
+        return results
     }
 
     /// The git-listed files under a directory, or `nil` when it is not a repository.
@@ -152,5 +205,50 @@ enum FileWalker {
     /// - Returns: the path's non-empty components.
     private static func pathComponents(_ path: String) -> [String] {
         path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+    }
+
+    // MARK: Search-root resolution
+
+    /// Resolves a requested path (or the session root) to a validated URL.
+    ///
+    /// A given `path` is validated through `validate` — each engine supplies its
+    /// own validation (``PathGuard/validate(_:for:)`` scoped to a directory for
+    /// ``GlobEngine``, ``PathGuard/validatePath(_:)`` for ``GrepEngine``) — while
+    /// an absent `path` resolves to the session root without validation. This is
+    /// the optional-path-resolution-with-session-root-fallback step both engines
+    /// share before their per-engine directory-versus-file handling diverges.
+    ///
+    /// - Parameters:
+    ///   - path: the requested path, or `nil` for the session root.
+    ///   - context: the shared session context supplying the session root.
+    ///   - validate: validates a non-`nil` path to a resolved URL, or a violation.
+    /// - Returns: `.success` with the resolved URL, or `.failure` with a
+    ///   corrective ``PathViolation``.
+    static func resolveRequestedPath(
+        _ path: String?,
+        in context: FileContext,
+        validate: (String) -> Result<URL, PathViolation>
+    ) -> Result<URL, PathViolation> {
+        guard let path else { return .success(context.root) }
+        return validate(path)
+    }
+
+    /// Refuses the filesystem root, then returns the resolved path's canonical directory URL.
+    ///
+    /// The shared tail of both engines' directory handling: the filesystem root
+    /// is refused through the context's ``PathGuard`` (a whole-filesystem walk is
+    /// never allowed), and the surviving path is canonicalized as a directory so
+    /// the walk and the session-relative paths share one prefix model.
+    ///
+    /// - Parameters:
+    ///   - resolved: the resolved directory URL to bound and canonicalize.
+    ///   - context: the shared session context supplying the path guard.
+    /// - Returns: `.success` with the canonical directory URL, or `.failure` with
+    ///   a corrective ``PathViolation``.
+    static func boundDirectory(_ resolved: URL, in context: FileContext) -> Result<URL, PathViolation> {
+        if case .failure(let violation) = context.pathGuard.rejectFilesystemRoot(resolved.path) {
+            return .failure(violation)
+        }
+        return .success(canonicalDirectory(resolved))
     }
 }

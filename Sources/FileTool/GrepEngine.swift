@@ -109,35 +109,23 @@ public struct GrepResult: Encodable, Sendable {
 /// as a ``corrective(_:)`` message the model reads and acts on within the turn,
 /// never thrown. Throwing from an operation's `execute(in:)` is fatal to the
 /// turn, so every recoverable condition returns a value instead.
-public enum GrepOutput: Encodable, Sendable {
+public enum GrepOutput: CorrectiveEncodable, Sendable {
     /// A successful grep carrying the ``GrepResult``.
     case content(GrepResult)
 
     /// A recoverable failure carrying a corrective message for the model.
     case corrective(String)
 
-    /// The coding keys for the ``corrective(_:)`` encoding.
-    private enum CodingKeys: String, CodingKey {
-        /// The corrective-message field.
-        case corrective
+    /// The successful ``GrepResult`` (encoded inline), or `nil` for a corrective outcome.
+    public var successResult: GrepResult? {
+        if case .content(let result) = self { return result }
+        return nil
     }
 
-    /// Encodes the outcome.
-    ///
-    /// A ``content(_:)`` outcome encodes the ``GrepResult`` inline (its
-    /// mode-shaped fields); a ``corrective(_:)`` outcome encodes a single
-    /// `corrective` field carrying the message.
-    ///
-    /// - Parameter encoder: the encoder to write the outcome into.
-    /// - Throws: An error if the encoder fails to encode a value.
-    public func encode(to encoder: Encoder) throws {
-        switch self {
-        case .content(let result):
-            try result.encode(to: encoder)
-        case .corrective(let message):
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(message, forKey: .corrective)
-        }
+    /// The corrective message, or `nil` for a successful outcome.
+    public var correctiveMessage: String? {
+        if case .corrective(let message) = self { return message }
+        return nil
     }
 }
 
@@ -212,6 +200,29 @@ public struct GrepEngine: Sendable {
         contentModeName: .content,
         filesWithMatchesModeName: .filesWithMatches,
         countModeName: .count
+    ]
+
+    /// Which optional fields a ``GrepResult`` carries, per output mode.
+    private struct ResultFields {
+        /// Whether the result carries the matched and context lines.
+        let includesMatches: Bool
+
+        /// Whether the result carries the matched-file list.
+        let includesFiles: Bool
+    }
+
+    /// The field selection for each output mode.
+    ///
+    /// The three modes differ only in which optional fields they populate:
+    /// `content` carries ``GrepResult/matches``, `filesWithMatches` carries
+    /// ``GrepResult/files``, and `count` carries neither. Expressing that as this
+    /// table interpreted by the single ``makeResult(mode:matches:files:matchCount:elapsedMilliseconds:)``
+    /// code path keeps the selection data-driven rather than three parallel
+    /// switch arms a human must keep in lockstep.
+    private static let resultFieldsByMode: [OutputMode: ResultFields] = [
+        .content: ResultFields(includesMatches: true, includesFiles: false),
+        .filesWithMatches: ResultFields(includesMatches: false, includesFiles: true),
+        .count: ResultFields(includesMatches: false, includesFiles: false)
     ]
 
     // MARK: File-type filter
@@ -403,14 +414,14 @@ public struct GrepEngine: Sendable {
         matchCount: Int,
         elapsedMilliseconds: Double
     ) -> GrepResult {
-        switch mode {
-        case .content:
-            return GrepResult(matches: matches, files: nil, matchCount: matchCount, fileCount: files.count, elapsedMilliseconds: elapsedMilliseconds)
-        case .filesWithMatches:
-            return GrepResult(matches: nil, files: files, matchCount: matchCount, fileCount: files.count, elapsedMilliseconds: elapsedMilliseconds)
-        case .count:
-            return GrepResult(matches: nil, files: nil, matchCount: matchCount, fileCount: files.count, elapsedMilliseconds: elapsedMilliseconds)
-        }
+        let fields = resultFieldsByMode[mode, default: ResultFields(includesMatches: false, includesFiles: false)]
+        return GrepResult(
+            matches: fields.includesMatches ? matches : nil,
+            files: fields.includesFiles ? files : nil,
+            matchCount: matchCount,
+            fileCount: files.count,
+            elapsedMilliseconds: elapsedMilliseconds
+        )
     }
 
     // MARK: File scanning
@@ -545,29 +556,17 @@ public struct GrepEngine: Sendable {
     /// - Returns: `.success` with the resolved ``SearchTarget``, or `.failure`
     ///   with a corrective ``PathViolation``.
     private static func resolveTarget(path: String?, in context: FileContext) -> Result<SearchTarget, PathViolation> {
-        let resolved: URL
-        if let path {
-            switch context.pathGuard.validatePath(path) {
-            case .success(let url):
-                resolved = url
-            case .failure(let violation):
-                return .failure(violation)
+        FileWalker.resolveRequestedPath(path, in: context) { context.pathGuard.validatePath($0) }
+            .flatMap { resolved in
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
+                    return .failure(PathViolation(pathMissingMessage(path ?? resolved.path)))
+                }
+                guard isDirectory.boolValue else {
+                    return .success(.singleFile(FileWalker.canonicalDirectory(resolved)))
+                }
+                return FileWalker.boundDirectory(resolved, in: context).map { .directory($0) }
             }
-        } else {
-            resolved = context.root
-        }
-
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
-            return .failure(PathViolation(pathMissingMessage(path ?? resolved.path)))
-        }
-        guard isDirectory.boolValue else {
-            return .success(.singleFile(FileWalker.canonicalDirectory(resolved)))
-        }
-        if case .failure(let violation) = context.pathGuard.rejectFilesystemRoot(resolved.path) {
-            return .failure(violation)
-        }
-        return .success(.directory(FileWalker.canonicalDirectory(resolved)))
     }
 
     // MARK: Candidate gathering
@@ -625,15 +624,20 @@ public struct GrepEngine: Sendable {
         glob: GlobPattern?,
         typeExtensions: Set<String>?
     ) -> [Candidate] {
-        var candidates: [Candidate] = []
-        for absolute in FileWalker.collectFiles(walkRoot: walkRoot, respectGitIgnore: true) {
-            guard let relativeToWalk = FileWalker.relativePath(ofAbsolute: absolute, under: walkRoot.path) else { continue }
-            if let glob, !glob.matches(relativePath: relativeToWalk, caseSensitive: false) { continue }
-            if let typeExtensions, !typeExtensions.contains(fileExtension(absolute)) { continue }
-            guard let relativeToSession = FileWalker.relativePath(ofAbsolute: absolute, under: sessionRoot.path) else { continue }
-            candidates.append(Candidate(absolutePath: absolute, relativePath: relativeToSession))
-        }
-        return candidates.sorted { $0.relativePath < $1.relativePath }
+        FileWalker.walkAndFilter(
+            walkRoot: walkRoot,
+            sessionRoot: sessionRoot,
+            respectGitIgnore: true,
+            accept: { absolute, relativeToWalk in
+                if let glob, !glob.matches(relativePath: relativeToWalk, caseSensitive: false) { return false }
+                if let typeExtensions, !typeExtensions.contains(fileExtension(absolute)) { return false }
+                return true
+            },
+            build: { absolute, relativeToSession -> Candidate? in
+                Candidate(absolutePath: absolute, relativePath: relativeToSession)
+            }
+        )
+        .sorted { $0.relativePath < $1.relativePath }
     }
 
     /// The lowercased filename extension of a path, or the empty string when there is none.
