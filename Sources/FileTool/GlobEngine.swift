@@ -451,7 +451,7 @@ public struct GlobEngine: Sendable {
     /// prevent whole-session walks.
     private static let broadPatternRules: [BroadPatternRule] = [
         .exact("*"),
-        .exact("**"),
+        .exact(GlobPattern.recursiveComponent),
         .exact("**/*"),
         .exact("*.*"),
         .bareExtension
@@ -528,6 +528,9 @@ struct GlobPatternError: Error {}
 /// ``isFilenameOnly`` and matches against the candidate's filename alone; any
 /// other pattern matches against the whole path relative to the search root.
 struct GlobPattern {
+    /// The `**` glob component that matches any number of path components, including zero.
+    static let recursiveComponent = "**"
+
     /// One path-separated component of a compiled pattern.
     private enum Component {
         /// A `**` component, matching any number of path components including zero.
@@ -590,10 +593,10 @@ struct GlobPattern {
     /// - Throws: ``GlobPatternError`` when the pattern contains invalid syntax
     ///   (currently an unterminated `[` character class).
     init(_ pattern: String) throws {
-        isFilenameOnly = !pattern.contains("/") && !pattern.contains("**")
+        isFilenameOnly = !pattern.contains("/") && !pattern.contains(Self.recursiveComponent)
         var compiled: [Component] = []
         for part in pattern.split(separator: "/", omittingEmptySubsequences: false) {
-            if part == "**" {
+            if String(part) == Self.recursiveComponent {
                 compiled.append(.recursive)
             } else {
                 compiled.append(.segment(try Self.compileSegment(part)))

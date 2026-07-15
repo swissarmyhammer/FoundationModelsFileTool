@@ -78,6 +78,30 @@ comments:
   id: 01kxkxr2e1dvf8sdxxa0nq7ghg
   text: 'Iteration 3: both -Throws: findings fixed for real (docs-only, git diff confirms every changed line is ///). GlobFiles.execute: added real `- Throws: Nothing; the signature carries throws to satisfy the OperationDefinition protocol requirement.` field AND removed the redundant prose sentence (that prose was the iter-2 recurrence — real field is now single source of truth). GlobEngine.GlobOutput.encode: added `- Throws: An error if the encoder fails to encode a value.` Swept BOTH files: GlobEngine throwing symbols encode[fixed], GlobPattern.init/compileSegment/parseCharacterClass[already had -Throws:]; GlobFiles execute[fixed]. Zero recurrences remain in these 2 files. ReadFile/WriteFile untouched (out of scope, DONE tasks). swift test --filter GlobFilesTests 17/17; full 105 unit + 1 integration green. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T22:18:21.505582+00:00
+- actor: claude-code
+  id: 01kxky2rfcyb3dqrn9h1z0pt42
+  text: 'Iteration 3 review: full pass 14/0, prior 3 findings [x] (both -Throws: docs + nesting all resolved, no recurrence). 1 new confirmed finding: GlobEngine.swift:151 the recursive-glob literal "**" repeated across broadPatternRules table + a contains check + an if → extract `private static let recursiveComponent = "**"` and use at all 3 sites. Pre-existing duplication (iter-3 only touched -Throws: docs, not the "**" logic), distinct rule (not a recurrence). Trivial. Looping to /implement iteration 4 — byte-identical matching behavior (the "**/*" literal is distinct from bare "**"; extract only what the finding targets, keep glob semantics identical, golden matrix tests must hold).'
+  timestamp: 2026-07-15T22:24:11.756509+00:00
+- actor: claude-code
+  id: 01kxky9v9fzetvw88ft0mtzq6f
+  text: |-
+    Iteration 4: worked the single 17:19 review finding (flipped to [x]). Behavior-preserving literal→constant extraction of the bare recursive-glob "**".
+
+    Extracted: `static let recursiveComponent = "**"` on `GlobPattern` (with one-line DocC, mirroring the file's constant style). NOTE it is module-internal, NOT `private` as the finding's example wording suggested: the literal appears in TWO types — `GlobEngine.broadPatternRules` and two sites in `GlobPattern` — and a `private static` in one struct cannot be referenced from the other, so a single shared constant must be internal. Homed it on `GlobPattern` because it is the type that owns the recursive-component concept (its `.recursive` case + the broadPatternRules DocC already explains the guard piggybacks on GlobPattern's lone-`**` semantics).
+
+    Three sites updated (all bare `"**"`, confirmed exactly 3 via grep):
+    1. GlobEngine.broadPatternRules: `.exact("**")` → `.exact(GlobPattern.recursiveComponent)`
+    2. GlobPattern.init isFilenameOnly: `!pattern.contains("**")` → `!pattern.contains(Self.recursiveComponent)`
+    3. GlobPattern.init component loop: `if part == "**"` → `if String(part) == Self.recursiveComponent` (part is a Substring; String(part) makes the equality typecheck against the String constant — byte-identical result)
+
+    DISTINCT literals left untouched: `"**/*"` (broadPatternRules) and `"**/*."` (broadExtensionPrefix) are different strings, deliberately not conflated. Glob matching semantics and the broad-pattern guard unchanged.
+
+    Verification: `swift test --filter GlobFilesTests` 17/17 green (incl. broad-pattern matrix scoped/unscoped, recursive `**` matching); full `swift test` 105 unit + 1 integration green, exit 0, no warnings. Running adversarial double-check. Task green, left in doing for /review.
+  timestamp: 2026-07-15T22:28:04.015927+00:00
+- actor: claude-code
+  id: 01kxkydagy49aaqt1nc82yxps2
+  text: 'Iteration 4: finding fixed, behavior-preserving. Added GlobPattern.recursiveComponent = "**" (one-line DocC). JUDGMENT: made it INTERNAL not private (finding''s example said private) — the literal lives in TWO types (GlobEngine.broadPatternRules + GlobPattern), and a private static in one struct is unreachable from the other, so a shared constant must be internal; homed on GlobPattern which owns the recursive-component concept. All 3 bare "**" sites converted: broadPatternRules .exact("**")→.exact(GlobPattern.recursiveComponent); GlobPattern.init isFilenameOnly contains; component-loop part=="**"→String(part)==Self.recursiveComponent. Distinct literals "**/*" and "**/*." (broadExtensionPrefix) deliberately NOT conflated. Only remaining "**" is the constant def. Byte-identical (double-check PASS: same contains overload, same String/Substring equality). swift test --filter GlobFilesTests 17/17; full 105 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T22:29:57.918331+00:00
 depends_on:
 - 01KXJWH0ZGPEAKRDWN520P15XY
 position_column: doing
@@ -114,3 +138,7 @@ Per plan.md §3 op table row 4. Create `Sources/FileTool/GlobEngine.swift` and `
 
 - [x] `Sources/FileTool/GlobEngine.swift:71` — The `encode` function is marked `throws` in its signature but the documentation lacks a `- Throws:` section; the rule requires documenting every throws clause present in the signature. Add a `- Throws:` section to the doc comment, e.g., `- Throws: encoding errors forwarded from the encoder.`.
 - [x] `Sources/FileTool/Operations/GlobFiles.swift:28` — The `execute` function is marked `throws` in its signature but the documentation lacks a `- Throws:` section; the rule requires documenting every throws clause present in the signature. Add a `- Throws:` section to the doc comment, e.g., `- Throws: nothing, but the signature carries `throws` to conform to the `OperationDefinition` protocol requirement.`.
+
+## Review Findings (2026-07-15 17:19)
+
+- [x] `Sources/FileTool/GlobEngine.swift:151` — The literal "**" representing the recursive glob operator is repeated across multiple code paths instead of being defined as a named constant. Extract as a private static constant (e.g., `private static let recursiveComponent = "**"`), then use it in all three places: the broadPatternRules table, the contains check, and the if statement.
