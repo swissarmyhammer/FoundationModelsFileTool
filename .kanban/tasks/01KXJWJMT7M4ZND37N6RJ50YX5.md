@@ -92,6 +92,33 @@ comments:
   id: 01kxm2spr4bse4mj87s8ch91jd
   text: 'Iteration 4: both findings fixed at root. Added private static let noResultFields = ResultFields(includesMatches:false,includesFiles:false) (2-line DocC) after ResultFields struct. Sites (file evolved past review''s 98/106 line numbers; actual current sites): resultFieldsByMode .count arm → noResultFields; resultFields(for:) default → [mode, default: noResultFields]. Swept: literal now appears exactly once (constant def), grep-confirmed. Behavior unchanged (pure literal→constant; default never exercised — all 3 modes are keys). swift test --filter GrepFilesTests 22/22, full 127 unit + 1 integration green, Glob green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T23:46:37.956660+00:00
+- actor: claude-code
+  id: 01kxm35s971d2fqcheewjcss5w
+  text: 'Iteration 4 review: full pass 14/0, all prior findings [x] (noResultFields dedup resolved, no recurrence). 7 new confirmed findings, ALL the same Swift argument-label rule ("first arg label omitted but not a value-preserving conversion") on private static helpers in GrepEngine.swift: :382 isBinary(_ data)→isBinary(data:); :549 fileExtension(_ path)→(path:); :560 resolveOutputMode(_ name)→(name:); :572 invalidPatternMessage(_ pattern)→(pattern:); :580 invalidGlobMessage(_ glob)→(glob:); :588 pathMissingMessage(_ path)→(path:); :596 unknownTypeMessage(_ type)→(type:). NEW dimension (first appearance — prior were reuse/dup/nesting/SSOT), spillover-scope (file under edit), NOT recurrences. All private static → call-site updates are same-file only, no external impact. Looping to /implement iteration 5: add the argument labels to all 7 + update call sites, AND sweep the ENTIRE GrepEngine.swift for any other unlabeled-first-arg-on-non-value-preserving helper so no 8th surfaces next round. Behavior-preserving (label change only), tests green.'
+  timestamp: 2026-07-15T23:53:13.767752+00:00
+- actor: claude-code
+  id: 01kxm3b6dkhnenwsgqx50bb78c
+  text: |-
+    Iteration 5 (implement): addressed all 7 of the 2026-07-15 18:48 findings — the same Swift argument-label rule ("first arg label omitted but not value-preserving") on private static helpers in GrepEngine.swift. Pure syntactic label change, no behavior/logic change; all call sites (same-file only, all private static) updated:
+
+    1. isBinary(_ data:) -> isBinary(data:); call at scanFile -> isBinary(data: data)
+    2. fileExtension(_ path:) -> fileExtension(path:); call in directoryCandidates accept closure -> fileExtension(path: absolute)
+    3. resolveOutputMode(_ name:) -> resolveOutputMode(name:); call in run() -> resolveOutputMode(name: outputMode)
+    4. invalidPatternMessage(_ pattern:) -> invalidPatternMessage(pattern:); call -> invalidPatternMessage(pattern: pattern)
+    5. invalidGlobMessage(_ glob:) -> invalidGlobMessage(glob:); call -> invalidGlobMessage(glob: glob)
+    6. pathMissingMessage(_ path:) -> pathMissingMessage(path:); call in resolveTarget -> pathMissingMessage(path: path ?? resolved.path)
+    7. unknownTypeMessage(_ type:) -> unknownTypeMessage(type:); call -> unknownTypeMessage(type: type)
+
+    Also updated the two DocC symbol cross-references that named the old signatures so docs stay accurate: outputModeMap docstring ``resolveOutputMode(_:)`` -> ``resolveOutputMode(name:)``; typeExtensionMap docstring ``unknownTypeMessage(_:)`` -> ``unknownTypeMessage(type:)``.
+
+    EXHAUSTIVE SWEEP: grepped the entire GrepEngine.swift for `func \w+\(_ \w+` — exactly 7 hits, all the findings above; no 8th. All other funcs/inits already use explicit labels or the idiomatic external label (`resultFields(for:)`), and there are no `init(_:)` single-value conversions to worry about. Also swept the task's other file Operations/GrepFiles.swift — clean (its only function is the labeled `execute(in:)`). Did NOT touch GlobEngine/FileWalker/other ops (other work).
+
+    Verified: swift test --filter GrepFilesTests => 22/22 pass; full swift test => 127 unit tests + 1 integration test pass, zero failures/zero warnings; GlobFilesTests (17) still green. All 7 findings flipped to [x]. Task left in doing.
+  timestamp: 2026-07-15T23:56:11.059205+00:00
+- actor: claude-code
+  id: 01kxm3btwf9qvpg34ph24bjqex
+  text: 'Iteration 5: all 7 argument-label findings fixed, label-only (call sites all private static, same-file, updated). isBinary(data:)/fileExtension(path:)/resolveOutputMode(name:)/invalidPatternMessage(pattern:)/invalidGlobMessage(glob:)/pathMissingMessage(path:)/unknownTypeMessage(type:); plus 2 DocC symbol cross-refs updated to new signatures. EXHAUSTIVE SWEEP: grepped GrepEngine.swift `func\s+\w+\s*\(\s*_\s+\w+` → exactly 7 hits (all the findings), no others; no init(_:) single-value conversions. GrepFiles.swift swept clean (only execute(in:), already labeled). GlobEngine/FileWalker/other ops untouched (other work). swift test --filter GrepFilesTests 22/22, full 127 unit + 1 integration green, Glob 17 green, 0 warnings. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T23:56:32.015322+00:00
 depends_on:
 - 01KXJWH0ZGPEAKRDWN520P15XY
 position_column: doing
@@ -134,3 +161,13 @@ Per plan.md §3 op table row 5. Create `Sources/FileTool/GrepEngine.swift` and `
 
 - [x] `Sources/FileTool/GrepEngine.swift:98` — ResultFields(includesMatches: false, includesFiles: false) appears identically at lines 98 and 106; extract to a named constant to maintain single source of truth and avoid duplication. Extract to `private static let noResultFields = ResultFields(includesMatches: false, includesFiles: false)` and replace both occurrences with references to this constant.
 - [x] `Sources/FileTool/GrepEngine.swift:106` — ResultFields(includesMatches: false, includesFiles: false) appears identically at lines 106 and 98; extract to a named constant to maintain single source of truth and avoid duplication. Extract to `private static let noResultFields = ResultFields(includesMatches: false, includesFiles: false)` and replace both occurrences with references to this constant.
+
+## Review Findings (2026-07-15 18:48)
+
+- [x] `Sources/FileTool/GrepEngine.swift:382` — First argument label omitted but this is not a value-preserving conversion — `isBinary` transforms `Data` into a `Bool`, so the parameter should be labeled for fluency at the call site. Change to `private static func isBinary(data: Data) -> Bool` and update call sites to `isBinary(data: data)`.
+- [x] `Sources/FileTool/GrepEngine.swift:549` — First argument label omitted but this is not a value-preserving conversion — `fileExtension` extracts a component from a path string, not a type-preserving transform, so the parameter should be labeled. Change to `private static func fileExtension(path: String) -> String` and update call sites to `fileExtension(path: absolute)`.
+- [x] `Sources/FileTool/GrepEngine.swift:560` — First argument label omitted but this is not a value-preserving conversion — `resolveOutputMode` looks up a name in a map and returns an optional mode, not a type-preserving transform, so the parameter should be labeled. Change to `private static func resolveOutputMode(name: String?) -> OutputMode?` and update call sites accordingly.
+- [x] `Sources/FileTool/GrepEngine.swift:572` — First argument label omitted but this is not a value-preserving conversion — `invalidPatternMessage` builds and returns a message string from a pattern, not a value-preserving transform, so the parameter should be labeled. Change to `private static func invalidPatternMessage(pattern: String) -> String` and update call sites accordingly.
+- [x] `Sources/FileTool/GrepEngine.swift:580` — First argument label omitted but this is not a value-preserving conversion — `invalidGlobMessage` builds and returns a message string from a glob pattern, not a value-preserving transform, so the parameter should be labeled. Change to `private static func invalidGlobMessage(glob: String) -> String` and update call sites accordingly.
+- [x] `Sources/FileTool/GrepEngine.swift:588` — First argument label omitted but this is not a value-preserving conversion — `pathMissingMessage` builds and returns a message string from a path, not a value-preserving transform, so the parameter should be labeled. Change to `private static func pathMissingMessage(path: String) -> String` and update call sites accordingly.
+- [x] `Sources/FileTool/GrepEngine.swift:596` — First argument label omitted but this is not a value-preserving conversion — `unknownTypeMessage` builds and returns a message string from a type name, not a value-preserving transform, so the parameter should be labeled. Change to `private static func unknownTypeMessage(type: String) -> String` and update call sites accordingly.

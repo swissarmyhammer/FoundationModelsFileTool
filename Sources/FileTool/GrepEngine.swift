@@ -193,7 +193,7 @@ public struct GrepEngine: Sendable {
     /// The mapping from an accepted `outputMode` name to its resolved ``OutputMode``.
     ///
     /// Output-mode resolution is data, not control flow: this table is the
-    /// single place that enumerates the accepted names, so ``resolveOutputMode(_:)``
+    /// single place that enumerates the accepted names, so ``resolveOutputMode(name:)``
     /// is one lookup and the valid names in ``unknownOutputModeMessage`` cannot
     /// drift out of step with what the engine actually accepts.
     private static let outputModeMap: [String: OutputMode] = [
@@ -246,7 +246,7 @@ public struct GrepEngine: Sendable {
     ///
     /// The file-type filter is data, not control flow: this table is the single
     /// place that enumerates the known types, so the filter is one lookup and
-    /// the known-type list in ``unknownTypeMessage(_:)`` cannot drift out of
+    /// the known-type list in ``unknownTypeMessage(type:)`` cannot drift out of
     /// step with what the engine actually accepts. Extensions are compared
     /// lowercased, so the values here are lowercase.
     private static let typeExtensionMap: [String: Set<String>] = [
@@ -307,14 +307,14 @@ public struct GrepEngine: Sendable {
         outputMode: String? = nil,
         in context: FileContext
     ) -> GrepOutput {
-        guard let mode = Self.resolveOutputMode(outputMode) else {
+        guard let mode = Self.resolveOutputMode(name: outputMode) else {
             return .corrective(Self.unknownOutputModeMessage)
         }
 
         let typeExtensions: Set<String>?
         if let type {
             guard let extensions = Self.typeExtensionMap[type.lowercased()] else {
-                return .corrective(Self.unknownTypeMessage(type))
+                return .corrective(Self.unknownTypeMessage(type: type))
             }
             typeExtensions = extensions
         } else {
@@ -326,7 +326,7 @@ public struct GrepEngine: Sendable {
             do {
                 compiledGlob = try GlobPattern(glob)
             } catch {
-                return .corrective(Self.invalidGlobMessage(glob))
+                return .corrective(Self.invalidGlobMessage(glob: glob))
             }
         } else {
             compiledGlob = nil
@@ -336,7 +336,7 @@ public struct GrepEngine: Sendable {
         do {
             regex = try Regex(caseInsensitive ? Self.caseInsensitivePrefix + pattern : pattern)
         } catch {
-            return .corrective(Self.invalidPatternMessage(pattern))
+            return .corrective(Self.invalidPatternMessage(pattern: pattern))
         }
 
         let target: SearchTarget
@@ -464,7 +464,7 @@ public struct GrepEngine: Sendable {
     ///   unreadable or binary.
     private static func scanFile(path: String, regex: Regex<AnyRegexOutput>) -> FileScan? {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        guard !isBinary(data) else { return nil }
+        guard !isBinary(data: data) else { return nil }
         guard let content = String(data: data, encoding: .utf8) else { return nil }
         let lines = Hashline.splitLines(content).map(\.text)
         var matchLines: [Int] = []
@@ -479,7 +479,7 @@ public struct GrepEngine: Sendable {
     /// - Parameter data: the file's bytes.
     /// - Returns: `true` when the first ``binarySniffWindowByteCount`` bytes
     ///   contain a NUL byte.
-    private static func isBinary(_ data: Data) -> Bool {
+    private static func isBinary(data: Data) -> Bool {
         data.prefix(binarySniffWindowByteCount).contains(nullByte)
     }
 
@@ -575,7 +575,7 @@ public struct GrepEngine: Sendable {
             .flatMap { resolved in
                 var isDirectory: ObjCBool = false
                 guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
-                    return .failure(PathViolation(pathMissingMessage(path ?? resolved.path)))
+                    return .failure(PathViolation(pathMissingMessage(path: path ?? resolved.path)))
                 }
                 guard isDirectory.boolValue else {
                     return .success(.singleFile(FileWalker.canonicalDirectory(resolved)))
@@ -645,7 +645,7 @@ public struct GrepEngine: Sendable {
             respectGitIgnore: true,
             accept: { absolute, relativeToWalk in
                 if let glob, !glob.matches(relativePath: relativeToWalk, caseSensitive: false) { return false }
-                if let typeExtensions, !typeExtensions.contains(fileExtension(absolute)) { return false }
+                if let typeExtensions, !typeExtensions.contains(fileExtension(path: absolute)) { return false }
                 return true
             },
             build: { absolute, relativeToSession -> Candidate? in
@@ -659,7 +659,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter path: the absolute path whose extension to read.
     /// - Returns: the lowercased extension, without the leading dot.
-    private static func fileExtension(_ path: String) -> String {
+    private static func fileExtension(path: String) -> String {
         URL(fileURLWithPath: path).pathExtension.lowercased()
     }
 
@@ -672,7 +672,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter name: the requested output-mode name, or `nil`.
     /// - Returns: the resolved output mode, or `nil` when the name is unrecognized.
-    private static func resolveOutputMode(_ name: String?) -> OutputMode? {
+    private static func resolveOutputMode(name: String?) -> OutputMode? {
         outputModeMap[name ?? defaultOutputModeName]
     }
 
@@ -682,7 +682,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter pattern: the rejected pattern.
     /// - Returns: the corrective message.
-    private static func invalidPatternMessage(_ pattern: String) -> String {
+    private static func invalidPatternMessage(pattern: String) -> String {
         "The `pattern` is not a valid regular expression: \(pattern)"
     }
 
@@ -690,7 +690,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter glob: the rejected glob filter.
     /// - Returns: the corrective message.
-    private static func invalidGlobMessage(_ glob: String) -> String {
+    private static func invalidGlobMessage(glob: String) -> String {
         "The `glob` filter is not a valid glob pattern: \(glob)"
     }
 
@@ -698,7 +698,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter path: the requested search path.
     /// - Returns: the corrective message.
-    private static func pathMissingMessage(_ path: String) -> String {
+    private static func pathMissingMessage(path: String) -> String {
         "The search path does not exist: \(path)"
     }
 
@@ -719,7 +719,7 @@ public struct GrepEngine: Sendable {
     ///
     /// - Parameter type: the rejected file type.
     /// - Returns: the corrective message.
-    private static func unknownTypeMessage(_ type: String) -> String {
+    private static func unknownTypeMessage(type: String) -> String {
         let names = typeExtensionMap.keys.sorted().joined(separator: ", ")
         return "The `type` parameter is not a known file type: \(type). Known types are: \(names)."
     }
