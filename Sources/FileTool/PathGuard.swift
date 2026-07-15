@@ -91,6 +91,12 @@ public struct PathGuard: Sendable {
     /// references the current directory, which is safe).
     private static let blockedPatterns = ["../", "\\..\\", "..\\", "\0", "\\0"]
 
+    /// The corrective-message prefix reported when a parent directory is missing.
+    ///
+    /// Referenced by ``parentDirectoryMissing(_:)`` so the exact wording lives in
+    /// a single place; the offending parent path is appended after one space.
+    private static let parentDirectoryMissingMessage = "Parent directory does not exist:"
+
     /// Creates a guard rooted at a session working directory.
     ///
     /// - Parameters:
@@ -162,7 +168,7 @@ public struct PathGuard: Sendable {
             return .failure(PathViolation("Symlinks are not allowed: \(resolvedPath)"))
         }
 
-        var validatedPath: String
+        let validatedPath: String
         switch Self.canonicalize(resolvedPath) {
         case .resolved(let canonical):
             validatedPath = canonical
@@ -171,8 +177,8 @@ public struct PathGuard: Sendable {
             case ENOENT:
                 // The path does not exist. This is acceptable for a write
                 // target as long as the parent directory exists.
-                if let parent = Self.parentPath(resolvedPath), !fileExists(parent) {
-                    return .failure(PathViolation("Parent directory does not exist: \(parent)"))
+                if case .failure(let violation) = parentDirectoryMissing(resolvedPath) {
+                    return .failure(violation)
                 }
                 validatedPath = resolvedPath
             case EACCES:
@@ -190,32 +196,74 @@ public struct PathGuard: Sendable {
             return .failure(PathViolation("Path contains invalid control characters"))
         }
 
-        if let workspaceRoot {
-            if case .failure(let violation) = ensureWorkspaceBoundary(validatedPath, workspaceRoot: workspaceRoot) {
-                return .failure(violation)
-            }
-        }
+        // Enforce the workspace boundary once here (after control-character
+        // validation) and, when symlinks are opted in, again on the symlink's
+        // real target inside `resolveSymlinkIfAllowed`, so both the requested
+        // path and its resolved target must stay within the boundary. Both
+        // stages route through `enforceWorkspaceBoundary`.
+        return enforceWorkspaceBoundary(validatedPath)
+            .flatMap { resolveSymlinkIfAllowed(originalPath: resolvedPath, validatedPath: validatedPath) }
+            .map { URL(fileURLWithPath: $0) }
+    }
 
-        // When symlinks are opted in, resolve the symlink to its real target and
-        // re-check the boundary against that target. A symlink whose target does
-        // not exist cannot be resolved and is rejected, so an opted-in symlink
-        // can never point outside the workspace. Mirrors the Rust
-        // `resolve_symlink_securely`.
-        if allowSymlinks && isSymlink(resolvedPath) {
-            switch Self.canonicalizeOrFail(validatedPath, failureMessage: "Failed to resolve symlink: \(resolvedPath)") {
-            case .success(let resolvedTarget):
-                validatedPath = resolvedTarget
-            case .failure(let violation):
-                return .failure(violation)
-            }
-            if let workspaceRoot {
-                if case .failure(let violation) = ensureWorkspaceBoundary(validatedPath, workspaceRoot: workspaceRoot) {
-                    return .failure(violation)
-                }
-            }
-        }
+    /// Enforce the workspace boundary on a path when a boundary is configured.
+    ///
+    /// A no-op returning `.success` when ``workspaceRoot`` is `nil`; otherwise
+    /// delegates to ``ensureWorkspaceBoundary(_:workspaceRoot:)``. Extracted so
+    /// the boundary check applied both after control-character validation and
+    /// after symlink re-resolution stays a single expression at each stage.
+    ///
+    /// - Parameter path: the resolved path to bound-check.
+    /// - Returns: `.success` when within the boundary (or unbounded), or
+    ///   `.failure` with a corrective ``PathViolation``.
+    private func enforceWorkspaceBoundary(_ path: String) -> Result<Void, PathViolation> {
+        guard let workspaceRoot else { return .success(()) }
+        return ensureWorkspaceBoundary(path, workspaceRoot: workspaceRoot)
+    }
 
-        return .success(URL(fileURLWithPath: validatedPath))
+    /// Re-resolve an opted-in symlink to its real target and re-check the boundary.
+    ///
+    /// When ``allowSymlinks`` is set and `originalPath` is itself a symlink, the
+    /// already validated path is re-canonicalized to its real target and the
+    /// workspace boundary is re-checked against that target, so an opted-in
+    /// symlink can never point outside the workspace — a dangling link fails to
+    /// canonicalize and is rejected. Otherwise `validatedPath` is returned
+    /// unchanged. Mirrors the Rust `resolve_symlink_securely`.
+    ///
+    /// - Parameters:
+    ///   - originalPath: the pre-canonicalization resolved path, tested for being
+    ///     a symlink.
+    ///   - validatedPath: the validated path to re-resolve and bound-check.
+    /// - Returns: `.success` with the path to operate on, or `.failure` with a
+    ///   corrective ``PathViolation``.
+    private func resolveSymlinkIfAllowed(
+        originalPath: String,
+        validatedPath: String
+    ) -> Result<String, PathViolation> {
+        guard allowSymlinks && isSymlink(originalPath) else {
+            return .success(validatedPath)
+        }
+        return Self.canonicalizeOrFail(validatedPath, failureMessage: "Failed to resolve symlink: \(originalPath)")
+            .flatMap { resolvedTarget in
+                enforceWorkspaceBoundary(resolvedTarget).map { resolvedTarget }
+            }
+    }
+
+    /// A `.failure` when `path`'s parent directory does not exist, else `.success`.
+    ///
+    /// Shared by ``validatePath(_:)`` (for a not-yet-created canonicalization
+    /// target) and ``checkPermission(_:for:)`` (for a `write` to a nonexistent
+    /// target), so the parent-existence rule and its corrective message live in
+    /// one place.
+    ///
+    /// - Parameter path: the path whose parent directory to check.
+    /// - Returns: `.success` when the parent exists (or there is no parent), or
+    ///   `.failure` with a corrective ``PathViolation``.
+    private func parentDirectoryMissing(_ path: String) -> Result<Void, PathViolation> {
+        if let parent = Self.parentPath(path), !fileExists(parent) {
+            return .failure(PathViolation("\(Self.parentDirectoryMissingMessage) \(parent)"))
+        }
+        return .success(())
     }
 
     /// Refuse a search root that would walk the whole filesystem or the process directory.
@@ -289,8 +337,8 @@ public struct PathGuard: Sendable {
                 if Self.isReadOnly(path) {
                     return .failure(PathViolation("File is read-only: \(path)"))
                 }
-            } else if let parent = Self.parentPath(path), !fileExists(parent) {
-                return .failure(PathViolation("Parent directory does not exist: \(parent)"))
+            } else {
+                return parentDirectoryMissing(path)
             }
 
         case .edit:
@@ -322,39 +370,33 @@ public struct PathGuard: Sendable {
         _ path: String,
         workspaceRoot: URL
     ) -> Result<Void, PathViolation> {
-        let canonicalWorkspace: String
-        switch Self.canonicalizeOrFail(workspaceRoot.path, failureMessage: "Invalid workspace root: \(workspaceRoot.path)") {
-        case .success(let canonical):
-            canonicalWorkspace = canonical
-        case .failure(let violation):
-            return .failure(violation)
-        }
-
-        let pathToCheck: String
-        if fileExists(path) {
-            switch Self.canonicalizeOrFail(path, failureMessage: "Failed to canonicalize path: \(path)") {
-            case .success(let canonical):
-                pathToCheck = canonical
-            case .failure(let violation):
-                return .failure(violation)
+        Self.canonicalizeOrFail(workspaceRoot.path, failureMessage: "Invalid workspace root: \(workspaceRoot.path)")
+            .flatMap { canonicalWorkspace in
+                resolvedPathToCheck(path).flatMap { pathToCheck in
+                    Self.pathStartsWith(pathToCheck, prefix: canonicalWorkspace)
+                        ? .success(())
+                        : .failure(
+                            PathViolation(
+                                "Path is outside workspace boundaries: \(pathToCheck) (workspace: \(canonicalWorkspace))"
+                            )
+                        )
+                }
             }
-        } else {
-            switch reconstructViaExistingParent(path) {
-            case .success(let reconstructed):
-                pathToCheck = reconstructed
-            case .failure(let violation):
-                return .failure(violation)
-            }
-        }
+    }
 
-        if !Self.pathStartsWith(pathToCheck, prefix: canonicalWorkspace) {
-            return .failure(
-                PathViolation(
-                    "Path is outside workspace boundaries: \(pathToCheck) (workspace: \(canonicalWorkspace))"
-                )
-            )
-        }
-        return .success(())
+    /// The real absolute path to bound-check for a path that may not yet exist.
+    ///
+    /// Canonicalizes an existing path directly; for a not-yet-created target,
+    /// defers to ``reconstructViaExistingParent(_:)`` so the boundary check
+    /// still operates on a real absolute path.
+    ///
+    /// - Parameter path: the path to resolve for bounding.
+    /// - Returns: `.success` with the resolved absolute path, or `.failure` with
+    ///   a corrective ``PathViolation``.
+    private func resolvedPathToCheck(_ path: String) -> Result<String, PathViolation> {
+        fileExists(path)
+            ? Self.canonicalizeOrFail(path, failureMessage: "Failed to canonicalize path: \(path)")
+            : reconstructViaExistingParent(path)
     }
 
     /// Reconstruct a nonexistent path against its deepest existing parent's canonical path.
@@ -366,17 +408,13 @@ public struct PathGuard: Sendable {
         var current = path
         while let parent = Self.parentPath(current) {
             if fileExists(parent) {
-                let canonicalParent: String
-                switch Self.canonicalizeOrFail(parent, failureMessage: "Failed to canonicalize parent directory: \(parent)") {
-                case .success(let canonical):
-                    canonicalParent = canonical
-                case .failure(let violation):
-                    return .failure(violation)
-                }
-                let remainder = Self.components(path).dropFirst(Self.components(parent).count)
-                let reconstructed =
-                    remainder.isEmpty ? canonicalParent : canonicalParent + "/" + remainder.joined(separator: "/")
-                return .success(reconstructed)
+                return Self.canonicalizeOrFail(parent, failureMessage: "Failed to canonicalize parent directory: \(parent)")
+                    .map { canonicalParent in
+                        let remainder = Self.components(path).dropFirst(Self.components(parent).count)
+                        return remainder.isEmpty
+                            ? canonicalParent
+                            : canonicalParent + "/" + remainder.joined(separator: "/")
+                    }
             }
             current = parent
         }
