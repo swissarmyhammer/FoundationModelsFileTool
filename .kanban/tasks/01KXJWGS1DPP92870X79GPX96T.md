@@ -125,10 +125,14 @@ comments:
   id: 01kxkbdsv2ees5ye7g0zbsktyz
   text: 'Iteration 5: both findings fixed at root (pure naming + constant extraction, zero behavior change). (1) Extracted `private static let hashHexDigits = 2`; renderHash builds format via String(format: "%0\(hashHexDigits)x", ...), parseAnchor uses hex.count == hashHexDigits. Correctly LEFT wholeFileHash''s %02x alone — that''s the universal byte→2-hex MD5 digest rendering, not the anchor-hash width; routing it through hashHexDigits would be a false coupling (good judgment). (2) crc32XorOut → crc32XOROut at all 4 sites; grep confirms zero lingering; no other interior-acronym violations. Golden fixture untouched, all 5 parity tests bit-exact. swift test --filter HashlineTests 16/16, full suite green, double-check PASS. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T16:58:10.658469+00:00
+- actor: claude-code
+  id: 01kxkbq2cda2a3wm287asxzjbh
+  text: 'DONE. Iteration 5 re-review clean (0 findings, 14 validators). All 4 review-findings sections resolved. Task moved doing→review→done. Converged in 5 iterations (findings per round: 11→9→9→2→0); doc-comment area stabilized after iter 3, extraction-spillover chain terminated at iter 5. Verified-good local commit: 105f026 (green build+test, bit-exact golden-vector parity with the Rust crate, clean review). Not pushed (user''s step). 4 checkpoint commits for this task: b18b86c, ebae62b, 9bf7d1a, d3ea2e2, 105f026.'
+  timestamp: 2026-07-15T17:03:14.317835+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8280'
 title: Hashline module (algorithm-exact port)
 ---
 ## What
