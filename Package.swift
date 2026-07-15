@@ -68,7 +68,11 @@ let package = Package(
         // tests can reach the package-internal runtime types directly.
         .testTarget(
             name: "FileToolTests",
-            dependencies: ["FileTool"]
+            dependencies: ["FileTool"],
+            // Golden-vector fixtures generated from the Rust
+            // `swissarmyhammer-hashline` crate, checked in and loaded via
+            // `Bundle.module` for the cross-tool anchor-dialect parity tests.
+            resources: [.copy("Fixtures")]
         ),
 
         // Isolated-directory integration tier: real temp workspaces and a real

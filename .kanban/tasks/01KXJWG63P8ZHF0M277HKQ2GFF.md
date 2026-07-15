@@ -1,4 +1,13 @@
 ---
+comments:
+- actor: claude-code
+  id: 01kxk5m16xb9akvqy840feeegz
+  text: |-
+    PARKED / delegated per user (2026-07-15). This task's work lives in another repo (FoundationModelsCodeContext), so instead of making the upstream change from /finish, I filed it as a task on the CodeContext board:
+      CodeContext board → task short_id 2hsy4gh (ULID 01KXK5KDHA557YS80A32HSY4GH), column todo, title "Make DiagnosticsReport contents public (records/counts/pending, DiagnosticRecord, Counts)".
+    That task has the exact file (Sources/FoundationModelsCodeContext/Diagnostics/DiagnosticRecord.swift), current-visibility facts, change list, acceptance criteria, and a non-@testable visibility test spec.
+    Leaving hkq2gff in todo on the FileTool board — it is effectively blocked on CodeContext 2hsy4gh (cross-board, so no depends_on link possible). /finish is skipping it this batch (no in-FileTool-repo work here). It blocks only downstream FileTool task 01KXJWKVHSPFD5TYG8B1CRX7KF, which will stay not-ready until the CodeContext change ships and this card is closed.
+  timestamp: 2026-07-15T15:16:43.357851+00:00
 position_column: todo
 position_ordinal: '8180'
 title: 'Upstream PR: make DiagnosticsReport contents public in FoundationModelsCodeContext'

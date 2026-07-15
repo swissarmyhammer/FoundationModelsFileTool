@@ -1,8 +1,45 @@
 ---
+comments:
+- actor: claude-code
+  id: 01kxk5mj2mpjtzh93tbysrk941
+  text: Picked up by /finish. Scaffolding dep (8n71z1g) is done; build/test green baseline. Algorithm-exact port of ../swissarmyhammer/crates/swissarmyhammer-hashline with golden-vector fixtures. Starting implement→test→commit→review loop.
+  timestamp: 2026-07-15T15:17:00.628217+00:00
+- actor: claude-code
+  id: 01kxk5vxj2mncegbm2tc5xqyr9
+  text: 'Research done. Read swissarmyhammer-hashline src (lib.rs, line_ending.rs, properties.rs). Algorithm confirmed: per-line hash = crc32fast (IEEE CRC-32) over the line trimmed of leading/trailing space+tab, masked to low byte (& 0xff), rendered 2-hex lowercase via {:02x}. tag() splits content into (text, terminator) preserving \n/\r\n/\r/"" and emits "N:HH|text"+terminator with absolute 1-based N. parse_anchor strips optional |text suffix, splits on first '':'', requires non-empty numeric line + exactly-2-hex hash. resolve = exact line (1-based, line 0 => no exact), then symmetric proximity search delta 1..=50 (+delta then -delta each step), nearest hash-match wins, text (trimmed compare) preferred over merely-hash-matching. wholeFileHash is NOT in the hashline crate; it lives in swissarmyhammer-tools shared_utils::whole_file_hash = format!("{:x}", md5::compute(bytes)) (MD5 hex, lowercase, 32 chars) -> CryptoKit Insecure.MD5 in Swift. Plan: generate golden vectors via a throwaway example in the hashline crate (uses crate fns + md5 for whole-file), dump JSON, then revert the swissarmyhammer repo. TDD the Swift Hashline.swift against the golden fixtures.'
+  timestamp: 2026-07-15T15:21:01.762221+00:00
+- actor: claude-code
+  id: 01kxk69dnthsv5r52smt53bg45
+  text: |-
+    Implemented (TDD, red-green). Landed Sources/FileTool/Hashline.swift: hashLine (IEEE CRC-32 table impl over space/tab-trimmed UTF-8 bytes, &0xff), renderHash (%02x), tag(lines:startLine:) (scalar-based split_lines preserving \n/\r\n/\r/mixed + trailing terminator; scalar scan avoids Swift's \r\n grapheme-cluster gotcha), wholeFileHash(bytes:) (CryptoKit Insecure.MD5 -> 32 lowercase hex, matches Rust format!("{:x}", md5::compute)), parseAnchor, resolveAnchor(_:in:) (string form parsing |text) + resolveAnchorIn core mirroring Rust resolve_index (symmetric delta 1..=50, nearest hash, text preferred, line 0 => no exact candidate).
+
+    Golden vectors: wrote a throwaway examples/golden.rs in the Rust hashline crate (dev-deps md5+serde_json), ran `cargo run --example golden`, captured JSON to Tests/FileToolTests/Fixtures/hashline-golden.json, then reverted the swissarmyhammer repo (Cargo.toml, Cargo.lock, example) — swissarmyhammer left byte-clean. Fixture covers hashLine (incl. whitespace/interior/unicode/empty), tag (LF/CRLF/CR/mixed/trailing/startLine), wholeFileHash (incl. empty), parseAnchor (valid + all Rust rejection cases), resolveAnchor (drift, stale, |text tie/relocate, empty, line-0 edge, and the ±50 resolves / ±51 fails window boundary auto-verified in Rust).
+
+    Package.swift: added resources:[.copy("Fixtures")] to FileToolTests; tests load via Bundle.module.
+
+    Tests: `swift test --filter HashlineTests` = 14/14 green. Full `swift test` = 15 tests FileToolTests suite + 1 integration scaffold, all green, no source warnings. Running advisory double-check, then leaving task in doing for /review.
+  timestamp: 2026-07-15T15:28:24.250181+00:00
+- actor: claude-code
+  id: 01kxk777885v29kytygw7q48dg
+  text: 'Advisory double-check returned REVISE with two LOW-severity exactness divergences (both outside the tool-emitted [0-9]+:[0-9a-f]{2} dialect, both unpinned): (1) parseAnchor''s digit-only guard rejects a leading ''+'' that Rust usize::parse reportedly accepts; (2) trimHorizontal trims by grapheme (Character) while Rust trim_matches trims by scalar (char) — divergent on whitespace immediately followed by a combining mark. Because the task bar is algorithm-EXACT/bit-for-bit, I''m fixing both rather than logging a justification. Approach: regenerate the golden fixture from the Rust crate WITH new edge cases (sign-prefixed line numbers +42/-42, and a leading-space+combining-mark hashLine case) so Rust — not the double-check''s assertion — is the oracle for what ''+42:a3'' should parse to; then fix Swift trimHorizontal to scalar-level and parseAnchor to match Rust, TDD red->green against the regenerated fixture.'
+  timestamp: 2026-07-15T15:44:40.712073+00:00
+- actor: claude-code
+  id: 01kxk7dz30tcddxw3agdytq4fc
+  text: |-
+    Both double-check findings FIXED and pinned (not justified away). Regenerated hashline-golden.json from the Rust crate with new edge cases; Rust's actual output confirmed both findings real: parse_anchor("+42:a3") = Some((42,0xa3)) and ("+255:ff")=Some((255,255)) — Rust usize::from_str DOES accept a leading '+' — while "-42:a3", " 42:a3", "42 :a3" all = None; and hash_line(" ́x") == hash_line("́x") == 50, proving Rust trims the leading space scalar (grapheme-trim would not). Fixes: (1) parseAnchor now allows one optional leading '+' then ASCII digits, rejects '-'/whitespace/non-digits — matches Rust; (2) trimHorizontal now scans unicodeScalars (per-scalar, like Rust char and like splitLines) instead of grapheme Characters. Added two named regression tests plus the new golden rows.
+
+    Justification for not re-spawning double-check a second time (bounded-loop contract allows at most one re-check): both findings were resolved using the Rust crate ITSELF as oracle — the regenerated golden vectors ARE Rust's output, which is stronger evidence than a second opinion. A second 14-min adversarial pass would not add signal.
+
+    Fixture now: 28 hashLine, 19 parseAnchor, 14 resolveAnchor, 12 tag, 7 wholeFileHash = 80 golden vectors. Verification: `swift test --filter HashlineTests` = 16/16 green; full `swift test` = 17 (FileToolTests) + 1 (integration) green, no source warnings. swissarmyhammer repo reverted byte-clean (git status empty). Leaving task in doing for /review.
+  timestamp: 2026-07-15T15:48:21.728560+00:00
+- actor: claude-code
+  id: 01kxk7fa1dpgq8jq54sfrryece
+  text: 'Iteration 1: implement landed green. Sources/FileTool/Hashline.swift ported bit-exact from the Rust crate. KEY DISCOVERY: the per-line "hash" is NOT a cryptographic hash — it is a table-based IEEE CRC-32 (poly 0xEDB88320) over the line trimmed of leading/trailing space+tab, masked to the low byte, rendered %02x. Whole-file token IS MD5 (CryptoKit Insecure.MD5, 32-char lowercase hex). Line splitter scans Unicode SCALARS (not Characters) so \r\n isn''t collapsed. 80 golden vectors generated from the Rust crate via a throwaway examples/golden.rs (swissarmyhammer repo reverted byte-clean afterward, git status empty). Adversarial double-check caught two exactness divergences (parseAnchor must accept leading ''+'' like Rust usize::from_str; trim must be per-scalar not per-grapheme) — both fixed against the Rust oracle. swift test --filter HashlineTests 16/16; full swift test green. Package.swift FileToolTests target gained resources:[.copy("Fixtures")]. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T15:49:05.709646+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
-position_column: todo
-position_ordinal: '8280'
+position_column: doing
+position_ordinal: '80'
 title: Hashline module (algorithm-exact port)
 ---
 ## What
@@ -15,12 +52,12 @@ Per plan.md §3 "Hashline". Create `Sources/FileTool/Hashline.swift`, an algorit
 Generate golden-vector fixtures from the Rust crate (small program or test dump in ../swissarmyhammer) and check them into `Tests/FileToolTests/Fixtures/hashline-golden.json`.
 
 ## Acceptance Criteria
-- [ ] Line hashes and whole-file tokens are bit-identical to the Rust crate on the golden vectors (cross-tool anchor dialect, plan risk §9.3)
-- [ ] Anchor resolution honors the ±50 window exactly (resolves at ±50, fails at ±51)
+- [x] Line hashes and whole-file tokens are bit-identical to the Rust crate on the golden vectors (cross-tool anchor dialect, plan risk §9.3)
+- [x] Anchor resolution honors the ±50 window exactly (resolves at ±50, fails at ±51)
 
 ## Tests
-- [ ] `Tests/FileToolTests/HashlineTests.swift`: golden-vector parity; drift resolution at ±1/±50/±51; stale-anchor fall-through returns nil; `|text` verification and relocation; token stability across repeated hashing; empty file / empty line edge cases
-- [ ] Run `swift test --filter HashlineTests` — expect: green
+- [x] `Tests/FileToolTests/HashlineTests.swift`: golden-vector parity; drift resolution at ±1/±50/±51; stale-anchor fall-through returns nil; `|text` verification and relocation; token stability across repeated hashing; empty file / empty line edge cases
+- [x] Run `swift test --filter HashlineTests` — expect: green
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
