@@ -15,11 +15,11 @@ import Foundation
 /// `files` tool resolve here and vice versa — one anchor dialect across the
 /// ecosystem. Parity is pinned by golden vectors generated from the Rust crate
 /// (`Tests/FileToolTests/Fixtures/hashline-golden.json`).
-enum Hashline {
+public enum Hashline {
     /// How far from the exact line number proximity search looks for a drifted
     /// anchor. The search expands symmetrically outward (`+1, -1, +2, -2, …`) up
     /// to this many lines on each side. Matches the Rust `PROXIMITY_WINDOW`.
-    static let proximityWindow = 50
+    public static let proximityWindow = 50
 
     // MARK: Per-line hash
 
@@ -36,14 +36,14 @@ enum Hashline {
     ///
     /// - Parameter line: the line text (line terminator excluded).
     /// - Returns: the low byte of the CRC-32 of the trimmed line bytes.
-    static func hashLine(_ line: String) -> UInt8 {
+    public static func hashLine(_ line: String) -> UInt8 {
         let trimmed = trimHorizontal(line)
         return UInt8(crc32(Array(trimmed.utf8)) & 0xff)
     }
 
     /// Render a hash byte as two lowercase hexadecimal characters
     /// (`0xa3` -> `"a3"`, `0x0f` -> `"0f"`).
-    static func renderHash(_ hash: UInt8) -> String {
+    public static func renderHash(_ hash: UInt8) -> String {
         String(format: "%02x", hash)
     }
 
@@ -60,7 +60,7 @@ enum Hashline {
     ///   - content: the raw file content, terminators intact.
     ///   - startLine: the 1-based line number assigned to the first line.
     /// - Returns: the tagged content as a single string.
-    static func tag(lines content: String, startLine: Int) -> String {
+    public static func tag(lines content: String, startLine: Int) -> String {
         var out = ""
         for (offset, line) in splitLines(content).enumerated() {
             let n = startLine + offset
@@ -81,7 +81,7 @@ enum Hashline {
     ///
     /// - Parameter bytes: the full on-disk file bytes.
     /// - Returns: a 32-character lowercase hex string.
-    static func wholeFileHash(bytes: Data) -> String {
+    public static func wholeFileHash(bytes: Data) -> String {
         Insecure.MD5.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -96,16 +96,16 @@ enum Hashline {
     /// parse as a Rust `usize` (an optional single leading `+` then a non-empty
     /// run of ASCII decimal digits — `-` and whitespace rejected) and the hash
     /// must be exactly two hex digits.
-    static func parseAnchor(_ s: String) -> (line: Int, hash: UInt8)? {
+    public static func parseAnchor(_ s: String) -> (line: Int, hash: UInt8)? {
         // Strip an optional `|text` suffix; the text is ignored here.
         let anchor: Substring = s.firstIndex(of: "|").map { s[s.startIndex..<$0] } ?? Substring(s)
         guard let colon = anchor.firstIndex(of: ":") else { return nil }
-        let num = anchor[anchor.startIndex..<colon]
+        let number = anchor[anchor.startIndex..<colon]
         let hex = anchor[anchor.index(after: colon)...]
-        guard !num.isEmpty, hex.count == 2 else { return nil }
+        guard !number.isEmpty, hex.count == 2 else { return nil }
         // Match Rust `usize::from_str`: allow one optional leading `+`, then a
         // non-empty ASCII digit run. `-`, whitespace, and non-digits are rejected.
-        var digits = num
+        var digits = number
         if digits.first == "+" { digits = digits.dropFirst() }
         guard !digits.isEmpty,
             digits.allSatisfy({ $0.isASCII && ("0"..."9").contains($0) }),
@@ -126,7 +126,7 @@ enum Hashline {
     /// ``resolveAnchorIn(_:line:hash:text:)`` for the exact rule. A caller that
     /// gets `nil` should fall through to literal interpretation rather than
     /// misapply.
-    static func resolveAnchor(_ anchor: String, in content: String) -> Int? {
+    public static func resolveAnchor(_ anchor: String, in content: String) -> Int? {
         guard let (line, hash) = parseAnchor(anchor) else { return nil }
         let text: String? = anchor.firstIndex(of: "|").map { String(anchor[anchor.index(after: $0)...]) }
         return resolveAnchorIn(content, line: line, hash: hash, text: text)
@@ -150,7 +150,7 @@ enum Hashline {
     ///
     /// `line == 0` (or any non-positive line) is treated as "no exact candidate"
     /// and the search proceeds from the first line. Performs no IO.
-    static func resolveAnchorIn(_ content: String, line: Int, hash: UInt8, text: String?) -> Int? {
+    public static func resolveAnchorIn(_ content: String, line: Int, hash: UInt8, text: String?) -> Int? {
         let lines = splitLines(content).map(\.text)
         return resolveIndex(lines, line: line, hash: hash, text: text).map { $0 + 1 }
     }
@@ -159,12 +159,12 @@ enum Hashline {
     /// per-line texts of the content, terminators excluded). Shared core for the
     /// public resolution entry points; mirrors the Rust `resolve_index`.
     private static func resolveIndex(_ lines: [String], line: Int, hash: UInt8, text: String?) -> Int? {
-        func hashMatches(_ idx: Int) -> Bool {
-            idx >= 0 && idx < lines.count && hashLine(lines[idx]) == hash
+        func hashMatches(_ index: Int) -> Bool {
+            index >= 0 && index < lines.count && hashLine(lines[index]) == hash
         }
-        func textMatches(_ idx: Int) -> Bool {
-            guard let wanted = text, idx >= 0, idx < lines.count else { return false }
-            return trimHorizontal(lines[idx]) == trimHorizontal(wanted)
+        func textMatches(_ index: Int) -> Bool {
+            guard let wanted = text, index >= 0, index < lines.count else { return false }
+            return trimHorizontal(lines[index]) == trimHorizontal(wanted)
         }
 
         // The exact line as a 0-based index; `line <= 0` -> no exact candidate.
@@ -215,8 +215,8 @@ enum Hashline {
         var i = scalars.startIndex
         var lineStart = i
 
-        func text(upTo idx: String.UnicodeScalarView.Index) -> String {
-            String(String.UnicodeScalarView(scalars[lineStart..<idx]))
+        func text(upTo index: String.UnicodeScalarView.Index) -> String {
+            String(String.UnicodeScalarView(scalars[lineStart..<index]))
         }
 
         while i < end {

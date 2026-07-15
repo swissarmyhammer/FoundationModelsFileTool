@@ -36,6 +36,32 @@ comments:
   id: 01kxk7fa1dpgq8jq54sfrryece
   text: 'Iteration 1: implement landed green. Sources/FileTool/Hashline.swift ported bit-exact from the Rust crate. KEY DISCOVERY: the per-line "hash" is NOT a cryptographic hash — it is a table-based IEEE CRC-32 (poly 0xEDB88320) over the line trimmed of leading/trailing space+tab, masked to the low byte, rendered %02x. Whole-file token IS MD5 (CryptoKit Insecure.MD5, 32-char lowercase hex). Line splitter scans Unicode SCALARS (not Characters) so \r\n isn''t collapsed. 80 golden vectors generated from the Rust crate via a throwaway examples/golden.rs (swissarmyhammer repo reverted byte-clean afterward, git status empty). Adversarial double-check caught two exactness divergences (parseAnchor must accept leading ''+'' like Rust usize::from_str; trim must be per-scalar not per-grapheme) — both fixed against the Rust oracle. swift test --filter HashlineTests 16/16; full swift test green. Package.swift FileToolTests target gained resources:[.copy("Fixtures")]. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T15:49:05.709646+00:00
+- actor: claude-code
+  id: 01kxk86h50dvp3e92d26dcxc7k
+  text: 'Iteration 1 review: 11 findings, all confirmed → task in review. Two mechanical themes in Sources/FileTool/Hashline.swift: (1) missing explicit `public` on symbols Package.swift documents as library API (Hashline enum, proximityWindow, renderHash, tag, wholeFileHash, resolveAnchor, resolveAnchorIn — all default internal); (2) forbidden abbreviations: `num`→`number`, three `idx` params in nested helpers hashMatches/textMatches/text(upTo:)→`index`. No contradictions. Looping to /implement iteration 2 to fix at root (make ALL library-API symbols public across the file; eliminate ALL abbreviations, not just cited lines).'
+  timestamp: 2026-07-15T16:01:46.656249+00:00
+- actor: claude-code
+  id: 01kxk8bd1mn8e8gq82ya3ex0wx
+  text: |-
+    Iteration 2 pickup (review->doing). Working the 11 confirmed findings at root across the whole file.
+
+    Public-visibility audit: all 7 top-level `static func`s in the Hashline enum are intended-public library API (Package.swift documents Hashline as embeddable). The reviewer cited renderHash/tag/wholeFileHash/resolveAnchor/resolveAnchorIn + the enum + proximityWindow, but NOT hashLine/parseAnchor. Cross-checked the Rust crate being ported: hash_line, render_hash, tag, parse_anchor, resolve_anchor_in are ALL `pub`. hashLine is the peer of the already-public renderHash; parseAnchor is the peer of the already-public resolveAnchor. To make a re-review find zero recurrences (per orchestrator instruction to audit the ENTIRE file), marking hashLine and parseAnchor public too. Genuinely-internal helpers (resolveIndex, Line, splitLines, trimHorizontal, crc32Table, crc32) are already `private` and stay private.
+
+    Abbreviations: num->number (3 sites in parseAnchor), idx->index (hashMatches, textMatches, text(upTo:)). Swept rest of file: remaining short names (i, c, n, s, out, crc) are conventional single-letter/idiom/acronym, not idx/num/tmp-style truncations — left as-is (reviewer applied same rule and flagged only num/idx). Pure visibility/naming changes; zero hashing/anchor logic or golden-fixture changes.
+  timestamp: 2026-07-15T16:04:26.292901+00:00
+- actor: claude-code
+  id: 01kxk8q3h570vepxmt0n7dhb9p
+  text: |-
+    Iteration 2 done, green. All 11 review findings fixed at root in Sources/FileTool/Hashline.swift and flipped to [x]:
+    - Visibility: Hashline enum + proximityWindow + all 7 top-level static funcs now explicitly `public` (hashLine/renderHash/tag/wholeFileHash/parseAnchor/resolveAnchor/resolveAnchorIn). Beyond the 7 cited, hashLine and parseAnchor were also marked public (both `pub` in the Rust crate; peers of already-public renderHash/resolveAnchor) so a re-review finds zero recurrences. Internal helpers (resolveIndex, Line, splitLines, trimHorizontal, crc32Table, crc32) stay `private`.
+    - Naming: num->number (3 sites), idx->index (hashMatches/textMatches/text(upTo:)). Whole-file sweep confirms no idx/num/tmp-style abbreviations remain.
+
+    Pure visibility/naming diff — no hashing/anchor/CRC/MD5/split-lines/trim logic changed, golden fixture untouched. Verification: `swift test --filter HashlineTests` = 16/16 green; full `swift test` = 17 (FileToolTests) + 1 (integration) green, no source warnings. All 5 golden-vector parity tests (hashLine/tag/wholeFileHash/parseAnchor/resolveAnchor) pass bit-exact. Advisory double-check returned PASS (confirmed pure refactor, no behavioral drift, no scope creep). Leaving in doing for /review.
+  timestamp: 2026-07-15T16:10:49.765701+00:00
+- actor: claude-code
+  id: 01kxk8qpp1t5e8edvz2kxe27cz
+  text: 'Iteration 2: all 11 findings fixed at root in Hashline.swift (pure visibility+naming, zero logic change). Made public: Hashline enum, proximityWindow, hashLine, renderHash, tag, wholeFileHash, parseAnchor, resolveAnchor, resolveAnchorIn (added hashLine+parseAnchor beyond the 7 cited — both pub in the Rust crate, so re-review finds zero recurrences). Kept helpers private (resolveIndex, Line, splitLines, trimHorizontal, crc32Table, crc32). Naming: num→number (3), idx→index (3 helpers); whole-file sweep clean. Golden fixture untouched (git diff confirms), all 5 parity tests pass. swift test --filter HashlineTests 16/16, full suite green. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-15T16:11:09.377276+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
 position_column: doing
@@ -61,3 +87,17 @@ Generate golden-vector fixtures from the Rust crate (small program or test dump 
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 10:51)
+
+- [x] `Sources/FileTool/Hashline.swift:5` — The `Hashline` enum is documented in Package.swift as part of the library's public API ("Core library: … `Hashline`, `EditEngine`, `AtomicWriter` … Exposed so downstream tools … can embed the operations directly"), but has no explicit `public` access modifier and defaults to `internal`. Public library symbols must be explicitly marked. Mark the enum `public enum Hashline {`.
+- [x] `Sources/FileTool/Hashline.swift:14` — `proximityWindow` is a static member of the public API enum and is referenced in documentation, but has no explicit `public` access modifier. Public library symbols must be explicitly marked. Mark with `public static let proximityWindow = 50`.
+- [x] `Sources/FileTool/Hashline.swift:33` — `renderHash(_:)` is part of the public Hashline API but lacks explicit `public` access. Public library functions must be explicitly marked. Mark with `public static func renderHash(_ hash: UInt8) -> String`.
+- [x] `Sources/FileTool/Hashline.swift:42` — `tag(lines:startLine:)` is part of the public Hashline API but lacks explicit `public` access. Public library functions must be explicitly marked. Mark with `public static func tag(lines content: String, startLine: Int) -> String`.
+- [x] `Sources/FileTool/Hashline.swift:57` — `wholeFileHash(bytes:)` is part of the public Hashline API but lacks explicit `public` access. Public library functions must be explicitly marked. Mark with `public static func wholeFileHash(bytes: Data) -> String`.
+- [x] `Sources/FileTool/Hashline.swift:86` — The variable `num` abbreviates 'number' and sacrifices clarity for brevity. The rule explicitly forbids such abbreviations; the full word must be used. Rename to `number` or `numberString`: `let number = anchor[anchor.startIndex..<colon]`.
+- [x] `Sources/FileTool/Hashline.swift:89` — `resolveAnchor(_:in:)` is part of the public Hashline API (the public string-form entry point) but lacks explicit `public` access. Public library functions must be explicitly marked. Mark with `public static func resolveAnchor(_ anchor: String, in content: String) -> Int?`.
+- [x] `Sources/FileTool/Hashline.swift:101` — `resolveAnchorIn(_:line:hash:text:)` is part of the public Hashline API but lacks explicit `public` access. Public library functions must be explicitly marked. Mark with `public static func resolveAnchorIn(_ content: String, line: Int, hash: UInt8, text: String?) -> Int?`.
+- [x] `Sources/FileTool/Hashline.swift:120` — The parameter `idx` in the nested `hashMatches(_:)` function is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used for clarity. Rename parameter to `index`: `func hashMatches(_ index: Int) -> Bool { index >= 0 && index < lines.count && hashLine(lines[index]) == hash }`.
+- [x] `Sources/FileTool/Hashline.swift:123` — The parameter `idx` in the nested `textMatches(_:)` function is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used for clarity. Rename parameter to `index`: `func textMatches(_ index: Int) -> Bool { guard let wanted = text, index >= 0, index < lines.count else { return false } return trimHorizontal(lines[index]) == trimHorizontal(wanted) }`.
+- [x] `Sources/FileTool/Hashline.swift:176` — The parameter `idx` in the nested `text(upTo:)` function inside `splitLines(_:)` is an abbreviation that violates the naming-clarity rule. The rule explicitly forbids `idx`; the full word `index` must be used. Rename parameter to `index`: `func text(upTo index: String.UnicodeScalarView.Index) -> String { String(String.UnicodeScalarView(scalars[lineStart..<index])) }`.
