@@ -304,7 +304,7 @@ public enum EditOutput: CorrectiveEncodable, Sendable {
     ///   ``replacesAll`` and ``occurrence`` disambiguators. The richer per-entry
 ///   `edits` object-array form ``EditEngine`` supports is not a model-facing
 ///   parameter here: the `@Operation` macro maps only primitive and
-///   primitive-array parameter types, so a nested `{find, replace, replaceAll}`
+///   primitive-array parameter types, so a nested `{find, replace, replacesAll}`
 ///   array is not expressible as an operation parameter.
 @Generable
 @Operation(verb: "edit", noun: "file", description: "Edit a file's contents by a batch of find/replace pairs, committed atomically with encoding and line-ending preservation")
@@ -333,26 +333,51 @@ extension EditFile {
 
     // MARK: Status names
 
+    /// The model-facing wire names of the resolution outcomes, as data.
+    ///
+    /// A `String`-raw-valued mirror of ``EditEngine/Resolution``'s cases, so the
+    /// wire names live as raw-value data in a single declaration — exactly as
+    /// ``AtomicWriter/LineEnding`` and ``AtomicWriter/TextEncoding`` carry theirs
+    /// and are read here as `.rawValue` — rather than as string literals repeated
+    /// across parallel `switch` arms.
+    ///
+    /// ``EditEngine/Resolution`` carries associated values (candidates,
+    /// near-misses, byte ranges) and so cannot itself key a lookup dictionary;
+    /// ``statusName(for:)`` maps each engine case to a member of this table and
+    /// reads the wire name from the non-optional ``rawValue``.
+    private enum StatusName: String {
+        case anchor
+        case literal
+        case recovered
+        case ambiguous
+        case nearMiss
+        case alreadyApplied
+        case consumedTarget
+    }
+
     /// The ``EditResult/status`` and ``EditOutcome/matchedBy`` name of a resolution.
     ///
     /// The single mapping from an ``EditEngine/Resolution`` to its wire name,
     /// shared by the applied per-pair outcomes (definite `anchor` / `literal` /
     /// `recovered` matches) and the whole-batch status of an unresolved batch
     /// (`ambiguous` / `nearMiss` / `alreadyApplied` / `consumedTarget`), so the
-    /// two never drift.
+    /// two never drift. The wire name is read from ``StatusName`` data; this
+    /// switch only routes each engine case to its member.
     ///
     /// - Parameter resolution: the resolution to name.
     /// - Returns: the wire name of the resolution.
     private static func statusName(for resolution: EditEngine.Resolution) -> String {
+        let name: StatusName
         switch resolution {
-        case .anchor: return "anchor"
-        case .literal: return "literal"
-        case .recovered: return "recovered"
-        case .ambiguous: return "ambiguous"
-        case .noMatch: return "nearMiss"
-        case .alreadyApplied: return "alreadyApplied"
-        case .consumedTarget: return "consumedTarget"
+        case .anchor: name = .anchor
+        case .literal: name = .literal
+        case .recovered: name = .recovered
+        case .ambiguous: name = .ambiguous
+        case .noMatch: name = .nearMiss
+        case .alreadyApplied: name = .alreadyApplied
+        case .consumedTarget: name = .consumedTarget
         }
+        return name.rawValue
     }
 
     /// The whole-batch status of a successfully applied batch.
@@ -595,16 +620,34 @@ extension EditFile {
         )
     }
 
+    /// The model-facing wire names of a diff line's change, as data.
+    ///
+    /// A `String`-raw-valued mirror of ``EditEngine/DiffLine/Change``'s cases, so
+    /// the wire names are data declared once and read via the non-optional
+    /// ``rawValue`` — matching the ``StatusName`` treatment above and the
+    /// codebase's ``AtomicWriter/LineEnding`` idiom — rather than string literals
+    /// across parallel `switch` arms.
+    private enum ChangeName: String {
+        case unchanged
+        case expected
+        case actual
+    }
+
     /// The wire name of a diff line's ``EditEngine/DiffLine/Change``.
+    ///
+    /// The wire name is read from ``ChangeName`` data; this switch only routes
+    /// each engine case to its member.
     ///
     /// - Parameter change: the diff-line change to name.
     /// - Returns: `unchanged`, `expected`, or `actual`.
     private static func changeName(for change: EditEngine.DiffLine.Change) -> String {
+        let name: ChangeName
         switch change {
-        case .unchanged: return "unchanged"
-        case .expected: return "expected"
-        case .actual: return "actual"
+        case .unchanged: name = .unchanged
+        case .expected: name = .expected
+        case .actual: name = .actual
         }
+        return name.rawValue
     }
 
     // MARK: Corrective messages
