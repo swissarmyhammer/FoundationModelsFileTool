@@ -45,7 +45,7 @@ public enum EditMatch {
     }
 
     /// A located span in the original content.
-    public struct Span: Equatable {
+    public struct Span: Equatable, Sendable {
         /// UTF-8 byte range into the original content.
         public let range: Range<Int>
         /// The 1-based first line of the span.
@@ -57,7 +57,7 @@ public enum EditMatch {
     }
 
     /// The result of running the literal-find ladder.
-    public enum MatchResult: Equatable {
+    public enum MatchResult: Equatable, Sendable {
         /// Exactly one confident match was found.
         ///
         /// - `range`: the UTF-8 byte range into the original content the caller
@@ -204,15 +204,8 @@ public enum EditMatch {
         let offsets = byteOffsets(of: findBytes, in: contentBytes).filter { start in
             !singleLine || isLineAligned(contentBytes, start: start, length: findBytes.count)
         }
-        switch offsets.count {
-        case 0:
-            return nil
-        case 1:
-            let start = offsets[0]
-            return .unique(range: start..<(start + findBytes.count), rung: rung, confidence: confidentMatchScore)
-        default:
-            return .ambiguous(candidates: offsets.map { span(of: contentBytes, range: $0..<($0 + findBytes.count)) })
-        }
+        let ranges = offsets.map { start in start..<(start + findBytes.count) }
+        return finalizeBlockMatches(contentBytes, ranges, rung)
     }
 
     /// Whether the byte range `start..<start+length` sits on physical line boundaries.
