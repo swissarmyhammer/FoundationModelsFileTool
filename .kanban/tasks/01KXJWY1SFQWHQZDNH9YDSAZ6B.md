@@ -71,10 +71,14 @@ comments:
   id: 01kxm672qjg2erbpxr53vct885
   text: 'Iteration 3: both findings fixed, behavior-preserving. (#1 Sendable) marked public struct Span: Equatable, Sendable; swept siblings → also marked public enum MatchResult: Equatable, Sendable (associated values Range<Int>/Rung/Float/[Span] all Sendable once Span is; sibling Rung already conformed); purely additive; left EditMatch namespace enum alone (no state). (#2 dup verdict) replaced locateExact inline 0/1/many switch with: let ranges = offsets.map{start in start..<(start+findBytes.count)}; return finalizeBlockMatches(contentBytes, ranges, rung). BYTE-IDENTICAL (double-check arm-by-arm PASS): same .exact rung threaded through; same confidence confidentMatchScore=1.0 (no parameterization needed); 0→nil (descends to normalized), 1→.unique(ranges[0]) = old start..<(start+len), many→.ambiguous(ranges.map span) order-preserving = old offsets.map. swift test --filter EditMatchTests 15/15 (26 golden fixtures + CRLF/indentation byte-preservation green), full 142 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T00:46:21.938402+00:00
+- actor: claude-code
+  id: 01kxm6qej1jq3y5htdf09s55xb
+  text: 'DONE. Iteration 3 re-review clean (full 14/0, 0 findings, 1 candidate refuted). Both review-findings sections resolved. Task moved doing→review→done. Converged in 3 iterations (findings/round: 2→2→0; dimensions idiom→Sendable+dup; algorithm correctness/rung-parity/byte-preservation/near-miss CLEAN throughout — algorithm-exact port held). Table-driven 4-rung ladder (exact→normalized→anchor→fuzzy), 26 golden parity fixtures from Rust, byte-range parity. Verified-good local commit: 58736b0 (green 143/143). Not pushed. Checkpoint commits: d97520e, d1cd1ae, 58736b0.'
+  timestamp: 2026-07-16T00:55:18.337108+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8880'
 title: Recovery ladder port (swissarmyhammer-edit-match)
 ---
 ## What
