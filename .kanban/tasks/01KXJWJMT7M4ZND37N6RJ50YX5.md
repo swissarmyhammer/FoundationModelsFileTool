@@ -119,10 +119,14 @@ comments:
   id: 01kxm3btwf9qvpg34ph24bjqex
   text: 'Iteration 5: all 7 argument-label findings fixed, label-only (call sites all private static, same-file, updated). isBinary(data:)/fileExtension(path:)/resolveOutputMode(name:)/invalidPatternMessage(pattern:)/invalidGlobMessage(glob:)/pathMissingMessage(path:)/unknownTypeMessage(type:); plus 2 DocC symbol cross-refs updated to new signatures. EXHAUSTIVE SWEEP: grepped GrepEngine.swift `func\s+\w+\s*\(\s*_\s+\w+` → exactly 7 hits (all the findings), no others; no init(_:) single-value conversions. GrepFiles.swift swept clean (only execute(in:), already labeled). GlobEngine/FileWalker/other ops untouched (other work). swift test --filter GrepFilesTests 22/22, full 127 unit + 1 integration green, Glob 17 green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-15T23:56:32.015322+00:00
+- actor: claude-code
+  id: 01kxm3nz90kkr913y35yntj4cm
+  text: 'DONE. Iteration 5 re-review clean (full 14/0, 0 findings). All 4 review-findings sections resolved. Task moved doing→review→done. Converged in 5 iterations (findings/round: 5→1→1→2→7→0; dimensions cross-engine-dup→SSOT-invariant→dup-literal→arg-labels; correctness/security/context-assembly/gitignore-anti-hang clean throughout). Extracted shared FileWalker (Glob+Grep) + CorrectiveEncodable protocol; data-driven type map + output-mode table; found+fixed negative-contextLines bug + firmlink canonicalization. Verified-good local commit: 676721c (green 128/128, stable across reruns). Not pushed. Checkpoint commits: 78d8f67, 73f614f, 2d20aea, 9caa5e6, 676721c.'
+  timestamp: 2026-07-16T00:02:04.192649+00:00
 depends_on:
 - 01KXJWH0ZGPEAKRDWN520P15XY
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8780'
 title: GrepEngine + grep files operation
 ---
 ## What
