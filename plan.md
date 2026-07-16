@@ -234,15 +234,22 @@ within the turn.
 
 ## 4. Live edit error detection — the CodeContext bridge
 
-The reason this package is more than a port. `DiagnosticsBridge` wraps one
-`CodeContext` instance (started lazily on the first mutation of a diagnosable file, stopped
-with the context):
+The reason this package is more than a port. **Multi-project by design** (rescoped
+2026-07-15): `FileContext.root` may sit *above* several git projects, so `DiagnosticsBridge`
+wraps one lazily-created `CodeContextManager<ProcessLanguageServerConnection>` — not a single
+`CodeContext` — and resolves the covering context *per mutated file*. The manager is created
+on the first mutation of a diagnosable file (a `.disabled` bridge never creates it; an
+`eagerWarmup: true` bridge warms the project enclosing the session root at creation instead)
+and shut down — closing every open context — on `stop()` / `deinit`.
 
-- After a committed `write file` / `edit file`, if the file's extension maps to an LSP-backed
-  language module (Swift via `sourcekit-lsp`, Rust, Python, TypeScript, Go, … — CodeContext's
-  `Languages.all` minus the LSP-less formats), the bridge calls
-  `context.diagnostics(scope: .file(path), severity: .warning, includeDependents: true)` and
-  waits for the settle engine (300 ms quiescence, 5 s hard timeout — CodeContext's defaults).
+- After a committed `write file` / `edit file` of a diagnosable file (extension mapped to an
+  LSP-backed `Languages.all` module — Swift via `sourcekit-lsp`, Rust, Python, TypeScript, Go,
+  … — minus the LSP-less formats), the bridge resolves the file's context via
+  `manager.context(containing: path, openIfNeeded: true)` (longest-prefix match on open roots,
+  else git-root discovery + open/start) and calls
+  `context.diagnostics(scope: .file(path), severity: .warning, includeDependents: true,
+  settleWindow:, hardTimeout:, perReportCap:)`, waiting for the settle engine (300 ms
+  quiescence, 5 s hard timeout by default; all three injectable on the bridge).
 - The result is folded into the op output as:
 
 ```swift
@@ -251,34 +258,66 @@ struct FileDiagnostics: Encodable {
     let errors: Int
     let warnings: Int
     let items: [DiagnosticItem]   // {file, line, column, severity, message, code?}, capped
-    let note: String?             // "server still warming up — re-check with read/diagnose"
+    let note: String?             // "the language server is still warming up — re-check…"
 }
 ```
 
 - `clean` is stated explicitly (an *edit-was-OK* signal the model can trust), `errors`
-  carries the actual compiler messages with line/column so the model can fix them with the
-  very next `edit file`, `pending` is honest about a not-yet-settled server (never blocks the
-  mutation — the write/edit has already succeeded), and `skipped` marks non-diagnosable files
-  (Markdown, JSON, YAML…), where no diagnostics pass runs at all.
+  carries the actual compiler messages with one-based line/column so the model can fix them
+  with the very next `edit file`, `pending` is honest about a not-yet-settled server (never
+  blocks the mutation — the write/edit has already succeeded), and `skipped` marks a file
+  that ran no diagnostics pass at all.
 - `includeDependents: true` means an edit that breaks *another* file (changed a signature its
   caller uses) surfaces that breakage too — CodeContext folds broken one-hop dependents in.
 
-**Upstream prerequisite (the one integration constraint):** `CodeContext.diagnostics(scope:)`
-is public and returns a public `DiagnosticsReport`, but the report's `records` / `counts` /
-`pending` members and the `DiagnosticRecord` type are currently `internal` — callable but not
-readable from a sibling package. Task 2 is a small PR to `FoundationModelsCodeContext` making
-those members (and `DiagnosticRecord`) public; the package's own plan already positions result
-types as "plain `Codable & Sendable` values … so wrapping ops as FoundationModels `Tool`s is a
-thin shim", so this is completing a stated intent, not changing design. Recorded fallback if
-the PR stalls: consume the already-public live stream
-`CodeContextState.diagnostics: [DocumentURI: [Diagnostic]]` after triggering a
-`diagnostics(scope:)` run — same data, slightly clumsier read.
+**Gates, before any resolution or manager creation.** A non-diagnosable extension (Markdown,
+JSON, YAML, …) is `skipped` without the manager ever being created. A filename containing a
+glob metacharacter (`*`, `?`, `[`) is `skipped` with a note — upstream treats a `.file` scope
+containing one as a glob, which can silently resolve to zero targets and read as a false
+`clean`. A file inside no git workspace (`context(containing:)` returns `nil`) is `skipped`
+with "not inside a git workspace — no diagnostics pass".
 
-**Second upstream conversation, non-blocking:** `CodeContext.init` requires a `TextEmbedding`
-and `start()` reconciles the full search index — heavier than a diagnostics-only consumer
-needs. We start with a `NullEmbedder` (dimension 1, zero vectors; the seam is a public
-protocol) and propose a diagnostics-only start mode upstream as a follow-up. Neither blocks
-this package.
+**Path rebase.** A `DiagnosticRecord.path` is relative to the *resolved context's* root; the
+bridge joins it onto `context.rootDirectory` (public `nonisolated` upstream) to recover the
+absolute path, then relativizes against `FileContext.root`, so every `items[].file` is
+session-root-relative and can be fed straight back into `edit file`.
+
+**True counts under a cap.** Upstream truncates a report's `records` to `perReportCap` *before*
+deriving its `counts`, so the bridge passes a deliberately large `perReportCap` (10_000) and
+applies its own smaller documented item cap only when building `items` — `errors` / `warnings`
+stay true even when `items` is truncated. (A run above 10_000 records is a residual upstream
+limit, far above any realistic single-file count.)
+
+**Error degradation never gates.** The mutation is already committed. A manager/open failure
+(including `CodeContextError.overlappingRoot`), a `start()` failure, or any diagnostics error
+degrades to `status: "pending"` + note; the op never fails because of the bridge.
+
+**Nested-repo semantics (documented behavior).** Nearest-open-ancestor wins: once an outer
+repository's context is open, files in a nested repository or submodule route to the outer
+context by longest-prefix match. Conversely, if an inner repository opened first, a later
+attempt to open the outer root throws `overlappingRoot` and degrades to `pending`.
+
+**Diagnostics seam (test hermeticity).** The bridge dispatches against an internal
+`protocol DiagnosticsResolving: Sendable`, whose one resolve-then-diagnose method returns a
+FileTool-owned value type (records + true counts + resolved context root) or `nil` for "no
+covering workspace". The production conformance owns the real `CodeContextManager` and maps
+the upstream `DiagnosticsReport` into that value type; unit tests inject a fake keyed by path
+prefix, so `DiagnosticsBridgeTests` never spawns a language server, never creates a manager,
+and never touches the filesystem. Real-LSP / real-manager behavior lives in the
+isolated-directory integration suites. The seam returns a FileTool-owned type deliberately: a
+plain-import sibling cannot construct a `DiagnosticsReport` (its initializer is `internal` and
+the dependency is not built for testing), so a fake could not otherwise produce one.
+
+**Upstream prerequisites (now satisfied, pinned at `91e2b00`):** `DiagnosticsReport`'s
+`records` / `counts` / `pending` members, the `DiagnosticRecord` type, and
+`CodeContext.rootDirectory` (`public nonisolated`) are public, and `CodeContextManager` is
+available — all reachable from a sibling package with a plain `import`.
+
+**Embedding, non-blocking:** `CodeContext.init` requires a `TextEmbedding` and `start()`
+reconciles the full search index — heavier than a diagnostics-only consumer needs. We start
+with a `NullEmbedder` (dimension 1, zero vectors; the seam is the public `TextEmbedding`
+protocol) and a diagnostics-only start mode remains a proposed upstream follow-up. Neither
+blocks this package.
 
 ## 5. How it reaches a session
 

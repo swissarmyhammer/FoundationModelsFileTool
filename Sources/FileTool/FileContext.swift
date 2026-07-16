@@ -1,26 +1,5 @@
 import Foundation
 
-/// The live edit-diagnostics bridge handle carried by a ``FileContext``.
-///
-/// - Important: This is a STUB. The real bridge — which wraps a
-///   `FoundationModelsCodeContext` instance and folds compiler
-///   errors and warnings into `write file` / `edit file` output after a
-///   committed mutation — lands in its own later task. It is declared here only
-///   so ``FileContext`` can carry the lazily-created handle the file operations
-///   will eventually consume, without pulling the diagnostics engine into this
-///   task. Do not build real behavior on this type yet.
-///
-/// Conforms to `Sendable` trivially: the stub carries no stored state. The
-/// real bridge will preserve `Sendable` conformance, isolating any mutable
-/// engine state behind an actor or equivalent synchronization.
-public final class DiagnosticsBridge: Sendable {
-    /// Creates the stub bridge.
-    ///
-    /// The real initializer will take the diagnostics-engine configuration; this
-    /// placeholder takes nothing and does no work.
-    public init() {}
-}
-
 /// The shared per-session state the five file operations dispatch against.
 ///
 /// A `FileContext` bundles everything one agent session's file tools need: the
@@ -56,13 +35,13 @@ public final class FileContext: Sendable {
     /// itself is unaffected.
     public let readOnly: Bool
 
-    /// The live edit-diagnostics bridge handle.
+    /// The live edit-diagnostics bridge.
     ///
-    /// - Important: Currently a ``DiagnosticsBridge`` stub (see that type). The
-    ///   handle is held eagerly and is cheap to create; the real bridge defers
-    ///   the expensive diagnostics-engine startup to the first diagnosable
-    ///   mutation internally, so a session that never mutates a diagnosable file
-    ///   never starts that engine.
+    /// The handle is held eagerly and is cheap to create; the bridge defers the
+    /// expensive work — creating its `CodeContextManager` and starting a
+    /// language server — to the first diagnosable mutation internally (unless
+    /// `eagerWarmup` warms the enclosing project at creation), so a session that
+    /// never mutates a diagnosable file never starts a server.
     public let diagnostics: DiagnosticsBridge
 
     /// Creates a session context rooted at a working directory.
@@ -73,10 +52,13 @@ public final class FileContext: Sendable {
     ///   - readOnly: whether to forbid mutating operations; defaults to `false`.
     ///   - allowSymlinks: whether the guard resolves symlinks rather than
     ///     rejecting them; defaults to `false` (the secure default).
-    public init(root: URL, readOnly: Bool = false, allowSymlinks: Bool = false) {
+    ///   - eagerWarmup: whether the diagnostics bridge best-effort warms the
+    ///     project enclosing ``root`` at creation rather than lazily on the first
+    ///     diagnosable mutation; defaults to `false`.
+    public init(root: URL, readOnly: Bool = false, allowSymlinks: Bool = false, eagerWarmup: Bool = false) {
         self.root = root
         self.readOnly = readOnly
         self.pathGuard = PathGuard(root: root, workspaceRoot: root, allowSymlinks: allowSymlinks)
-        self.diagnostics = DiagnosticsBridge()
+        self.diagnostics = DiagnosticsBridge(root: root, eagerWarmup: eagerWarmup)
     }
 }

@@ -8,9 +8,9 @@ import Operations
 /// and the ``taggedContent`` is those bytes tagged with absolute hashline
 /// anchors, both computed exactly as a subsequent `read file` of the same path
 /// computes them — so a chained `edit file` can resolve the anchors without an
-/// intervening read. The ``diagnostics`` are the compiler diagnostics folded in
-/// after the mutation; they are always `nil` until the diagnostics-bridge task
-/// wires them.
+/// intervening read. The ``diagnostics`` are the compiler diagnostics
+/// ``DiagnosticsBridge`` folds in after the committed write, or `nil` when the
+/// bridge is disabled.
 public struct WriteResult: Encodable, Sendable {
     /// The absolute path written.
     public let path: String
@@ -201,13 +201,14 @@ extension WriteFile {
             return .corrective(Self.writeFailureMessage(path: filePath))
         }
 
+        let diagnostics = await context.diagnostics.diagnose(fileAt: url)
         return .content(
             WriteResult(
                 path: url.path,
                 bytesWritten: data.count,
                 hash: Hashline.wholeFileHash(bytes: data),
                 taggedContent: Self.tagged(content: content),
-                diagnostics: nil
+                diagnostics: diagnostics
             )
         )
     }

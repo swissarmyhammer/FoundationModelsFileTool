@@ -179,8 +179,9 @@ public struct EditOutcome: Encodable, Sendable {
 /// file and preserved across the rewrite, never rewritten. The ``hash`` and
 /// ``taggedContent`` are computed exactly as a subsequent `read file` computes
 /// them, so a chained edit can lift an anchor without an intervening read. The
-/// ``diagnostics`` are folded in after the mutation; they are always `nil` until
-/// the diagnostics-bridge task wires them.
+/// ``diagnostics`` are the compiler diagnostics ``DiagnosticsBridge`` folds in
+/// after an `applied` commit, or `nil` for an unapplied outcome or a disabled
+/// bridge.
 public struct EditResult: Encodable, Sendable {
     /// The absolute path edited.
     public let path: String
@@ -449,7 +450,7 @@ extension EditFile {
 
         switch EditEngine.apply(pairs, to: decoded.text) {
         case .applied(let content, let edits):
-            return Self.commit(content: content, edits: edits, to: url, decoded: decoded, lineEnding: lineEnding, path: filePath)
+            return await Self.commit(content: content, edits: edits, to: url, decoded: decoded, lineEnding: lineEnding, path: filePath, context: context)
         case .failed(_, let pair, let resolution):
             return .content(Self.unresolvedResult(path: url.path, pair: pair, resolution: resolution))
         }
@@ -493,6 +494,7 @@ extension EditFile {
     ///   - decoded: the decoded original, supplying the encoding to re-apply.
     ///   - lineEnding: the detected line-ending convention to record, or `nil`.
     ///   - path: the requested path, for a corrective message.
+    ///   - context: the shared session context supplying the diagnostics bridge.
     /// - Returns: the applied ``EditOutput/content(_:)``, or an
     ///   ``EditOutput/corrective(_:)`` when the atomic write fails.
     private static func commit(
@@ -501,14 +503,16 @@ extension EditFile {
         to url: URL,
         decoded: AtomicWriter.DecodedText,
         lineEnding: AtomicWriter.LineEnding?,
-        path: String
-    ) -> EditOutput {
+        path: String,
+        context: FileContext
+    ) async -> EditOutput {
         let data = AtomicWriter.encode(content, as: decoded.encoding)
         do {
             try AtomicWriter.write(data, to: url)
         } catch {
             return .corrective(Self.pathErrorMessage(Self.commitFailureDescription, path: path))
         }
+        let diagnostics = await context.diagnostics.diagnose(fileAt: url)
         return .content(
             EditResult(
                 path: url.path,
@@ -520,7 +524,7 @@ extension EditFile {
                 lineEndings: lineEnding?.rawValue,
                 hash: Hashline.wholeFileHash(bytes: data),
                 taggedContent: tagged(content: content),
-                diagnostics: nil
+                diagnostics: diagnostics
             )
         )
     }

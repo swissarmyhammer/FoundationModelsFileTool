@@ -1,10 +1,57 @@
 ---
+comments:
+- actor: claude-code
+  id: 01kxpbfc067byn3x0vqxdn5c2b
+  text: 'Picked up by /finish. Deps all done: hkq2gff (public CodeContext.rootDirectory + CodeContextManager pinned 91e2b00), a76xpf4 (WriteResult.diagnostics slot), 0efws09 (EditResult.diagnostics slot). Multi-project bridge wrapping ONE lazily-created CodeContextManager<ProcessLanguageServerConnection>; per-file context(containing:openIfNeeded:) routing; DiagnosticsResolving: Sendable protocol shim (unit tests use a fake keyed by path prefix — NO real LSP; real-LSP/real-manager covered by separate integration-suite tasks). Key semantics: NullEmbedder (dim 1 zero vec); .disabled never creates manager; diagnosable-extension gate + glob-metachar (*?[) gate → skipped BEFORE resolution/manager creation; nil resolution → skipped "not inside a git workspace"; perReportCap 10_000 so counts are true pre-item-cap, separate documented item cap for FileDiagnostics.items; errors/manager/overlappingRoot/start failures degrade to pending (never gate — mutation already committed); nested-repo nearest-open-ancestor wins (documented); eagerWarmup:Bool=false seam on FileContext.init; injectable settleWindow(300ms)/hardTimeout(5s)/perReportCap; PATH REBASE items to SESSION-root-relative (join DiagnosticRecord.path with context.rootDirectory, relativize vs FileContext.root); stop()/deinit → manager.shutdown(); wire into WriteResult/EditResult.diagnostics; replace FileContext/FileDiagnostics stubs. Also update plan.md §4 (rescope to multi-project) per task. Front-load conventions (public/DocC incl -Throws:/no-abbrev/named-constants incl 10_000/300ms/5s/data-driven status mapping/no-dup-literals/low-complexity/Sendable/arg-labels). Starting implement→test→commit→review loop.'
+  timestamp: 2026-07-16T20:56:45.318434+00:00
+- actor: claude-code
+  id: 01kxpc7g6fkm4gchyhdnb9zqcg
+  text: |-
+    Research complete. Upstream pinned at 91e2b00 confirmed. Key API facts:
+    - CodeContextManager<ProcessLanguageServerConnection> public convenience init(embedder:) is async but only stores pieces + ManagerState(); context(containing:openIfNeeded:) does longest-prefix routing then RootDiscovery.gitRoot (a pure filesystem .git walk, hermetic — no subprocess) + open/start. Returns nil when no open root covers path and no enclosing git repo. shutdown() closes all. manager.state.roots is PUBLIC → use for open-roots accessor.
+    - CodeContext.diagnostics(scope:severity:includeDependents:settleWindow:hardTimeout:perReportCap:) → DiagnosticsReport. rootDirectory public nonisolated.
+    - Languages.all is PUBLIC with public languageServer/fileExtensions → derive diagnosable-extension set at runtime (Languages.all.filter{languageServer != nil}.flatMap fileExtensions), mirroring upstream's own knownExtensions exactly. No hardcoded list.
+    - CRITICAL: DiagnosticsReport/DiagnosticRecord/Counts have INTERNAL inits and the dependency is NOT built with -enable-testing, so tests CANNOT construct a DiagnosticsReport (UpstreamVisibilityTests documents this; only @testable import FileTool is ever used). Therefore the DiagnosticsResolving seam returns a FileTool-owned value type (ResolvedDiagnostics{records,errorCount,warningCount,pending,contextRoot}), NOT the upstream report — which also honors the card's "No dependency on CodeContext internals". Production ManagerDiagnosticsResolver maps DiagnosticsReport→ResolvedDiagnostics; the fake constructs ResolvedDiagnostics directly. This is what keeps DiagnosticsBridgeTests hermetic (no @testable on the dependency, no manager, no LSP). Rebase needs contextRoot, so the seam surfaces it alongside records — that is the "track resolved root for output rebase".
+    - Existing write/edit unit tests use only .txt/.sh (non-diagnosable) and never assert on the diagnostics field, so wiring the bridge in yields skipped (fast, no manager) and does not break them.
+    Starting TDD: writing DiagnosticsBridgeTests against the fake first.
+  timestamp: 2026-07-16T21:09:56.047225+00:00
+- actor: claude-code
+  id: 01kxpcr7jf2c40f6yd354dbjfq
+  text: |-
+    Implementation landed (TDD: DiagnosticsBridgeTests written first, red = missing types/compile-fail, then source to green). Files: Sources/FileTool/DiagnosticsBridge.swift (DiagnosticsResolving seam + ManagerDiagnosticsResolver production actor + ResolvedDiagnostics/ResolvedDiagnosticRecord/ResolvedSeverity value types + DiagnosticsStatus wire enum + the bridge), NullEmbedder.swift, FileDiagnostics.swift (real FileDiagnostics + DiagnosticItem), FileContext.swift (eagerWarmup param, builds real enabled bridge), Operations/WriteFile.swift + EditFile.swift (diagnose wired into WriteResult/EditResult on the committed-success path only; EditFile.commit now async + takes context). plan.md §4 rewritten to the multi-project CodeContextManager design.
+
+    Seam deviation (documented in code + plan): the card says the method returns DiagnosticsReport?, but I return a FileTool-owned ResolvedDiagnostics? because (a) DiagnosticsReport/DiagnosticRecord have internal inits and the dependency isn't built with -enable-testing, so a fake CANNOT construct one across the package boundary (UpstreamVisibilityTests documents exactly this), and (b) rebase needs the resolved context root which the report doesn't carry. Production ManagerDiagnosticsResolver maps the real DiagnosticsReport→ResolvedDiagnostics (counts from report.counts, records from report.records, root from context.rootDirectory). This also satisfies the card's "No dependency on CodeContext internals". This is the only deviation from the literal card and it's what makes the unit tests hermetic.
+
+    Open-roots accessor uses manager.state.roots (public), read via MainActor.run since ManagerState.roots is @MainActor-isolated. Named constants for all magic numbers (10_000 perReportCap, 300ms/5s defaults, item cap 100, NullEmbedder dim 1); data-driven status (DiagnosticsStatus:String) and severity (ResolvedSeverity:String) via the repo's StatusName/ChangeName idiom.
+
+    swift test --filter DiagnosticsBridgeTests: 16/16 green. Full swift test: all 14 suites green, exit 0 (206 unit + integration scaffold). No warnings. Awaiting adversarial double-check, then leaving in doing for /review.
+  timestamp: 2026-07-16T21:19:04.271894+00:00
+- actor: claude-code
+  id: 01kxpd4jr7pvp1eqqcb180xdfp
+  text: |-
+    Adversarial double-check returned REVISE with one medium finding (sound): the glob-metacharacter gate only checked fileURL.lastPathComponent, but the bridge hands upstream the full absolute path via scope:.file(fileURL.path) and upstream's glob detection scans the ENTIRE pattern string — so a metacharacter in an ANCESTOR directory (e.g. /session/proj[a]/Sources/Alpha.swift) slipped the gate, tripped upstream's Darwin.glob → GLOB_NOMATCH → zero targets → false `clean`, exactly the hazard the gate exists to prevent.
+
+    Fixed via TDD: added globMetacharacterInAncestorDirectoryIsSkippedBeforeResolution (watched it fail — resolver was called, status clean/note nil), then changed containsGlobMetacharacter to scan fileURL.path (mirroring upstream's own pattern.contains(where:{"*?["...}) check) instead of lastPathComponent. Updated the DocC on containsGlobMetacharacter and the globMetacharacters constant.
+
+    double-check also confirmed everything else verified correct against the real upstream API and that the ResolvedDiagnostics? seam deviation is genuinely forced (internal init + no -enable-testing on the dep; rebase needs the resolved root) and sound — no other action needed; proceeding without a second double-check cycle per really-done's bounded-loop contract.
+
+    Final: swift test --filter DiagnosticsBridgeTests 17/17 green; full swift test all 14 suites green, exit 0; no build warnings. Task complete and left in doing for /review.
+  timestamp: 2026-07-16T21:25:48.935063+00:00
+- actor: claude-code
+  id: 01kxpd62vfeqq84w3mqnqx0vxs
+  text: |-
+    Iteration 1: implement landed green (large task). NullEmbedder.swift (TextEmbedding dim 1 zero vec). DiagnosticsBridge.swift: protocol DiagnosticsResolving: Sendable seam; ManagerDiagnosticsResolver (actor, production) owns ONE lazily-created CodeContextManager<ProcessLanguageServerConnection>, routes context(containing:openIfNeeded:) → per-context .diagnostics → reads context.rootDirectory; DiagnosticsBridge (public final Sendable) does gates (diagnosable-extension, glob-metachar), nil→skipped, report→FileDiagnostics mapping, session-root path rebase, item cap w/ true counts (perReportCap 10_000 constant), error degradation→pending (never gates), lazy vs eagerWarmup, disabled mode, stop()/deinit→shutdown(), internal openRootDirectories(). FileDiagnostics.swift real type + DiagnosticItem (Encodable/Sendable). FileContext eagerWarmup:Bool=false + builds real bridge. WriteFile/EditFile wire diagnose(fileAt:) into diagnostics on committed-success path (EditFile.commit now async+takes context). plan.md §4 rewritten to multi-project CodeContextManager design.
+
+    FORCED DEVIATION (documented, flag for reviewer): seam returns FileTool-owned ResolvedDiagnostics? NOT the card's literal DiagnosticsReport?. Reason: DiagnosticsReport/DiagnosticRecord have INTERNAL inits and the dep isn't built -enable-testing, so a test-target fake CANNOT construct a DiagnosticsReport — a -> DiagnosticsReport? seam would be untestable with a fake. ResolvedDiagnostics (records + true counts + resolved root) also satisfies the card's explicit "No dependency on CodeContext internals" and carries the root the rebase needs. Fake (actor keyed by path prefix) builds ResolvedDiagnostics directly — no manager/LSP/filesystem, fully hermetic. Not fabrication — the literal signature is impossible for a fake to satisfy; documented in code + plan + UpstreamVisibilityTests note.
+
+    double-check REVISE→fixed: glob gate checked only filename but bridge passes full absolute path to upstream → metachar in an ANCESTOR dir could slip to false clean; gate now scans fileURL.path (mirrors upstream detection), new failing→passing test. swift test --filter DiagnosticsBridgeTests 17/17; full 14 suites green, exit 0, 0 warnings. Real-LSP/real-manager OUT OF SCOPE (integration-suite tasks). Left in doing → /test → /commit → /review.
+  timestamp: 2026-07-16T21:26:38.191147+00:00
 depends_on:
 - 01KXJWG63P8ZHF0M277HKQ2GFF
 - 01KXJWHT8YA35WZ6GGKA76XPF4
 - 01KXJWKBK3F6QH05RQS0EFWS09
-position_column: todo
-position_ordinal: 8a80
+position_column: doing
+position_ordinal: '80'
 title: 'DiagnosticsBridge: CodeContextManager per-file routing + FileDiagnostics in write/edit results'
 ---
 ## What

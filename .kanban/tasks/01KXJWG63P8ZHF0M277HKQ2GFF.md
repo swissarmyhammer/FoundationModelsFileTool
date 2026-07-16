@@ -68,8 +68,12 @@ comments:
   id: 01kxpb5rytb92bzbns68yjsvzn
   text: 'Iteration 2: finding fixed, docs-only. Added to ProbeEmbedder.embed (after -Returns): `/// - Throws: Nothing; the signature carries throws to satisfy the TextEmbedding protocol requirement.` (honest — body never throws; mirrors the established never-throwing execute(in:) pattern in EditFile/GlobFiles/GrepFiles). Whole-file sweep: embed is the ONLY throwing symbol; helpers non-throwing, @Test methods non-throwing (one async not throws), no inits → zero recurrences. git diff shows only UpstreamVisibilityTests.swift (+1 comment) + kanban metadata; Package.resolved untouched (still 91e2b00). swift test --filter UpstreamVisibilityTests 2/2, full 190 unit + 1 integration green. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T20:51:30.906628+00:00
-position_column: doing
-position_ordinal: '80'
+- actor: claude-code
+  id: 01kxpbecpzncssxrkfnt30e6x7
+  text: 'DONE. Iteration 2 re-review clean (full 14/0, 0 findings). Prior finding resolved. Task moved doing→review→done. Converged in 2 iterations (1→0). Upstream half (CodeContext.rootDirectory public nonisolated) landed by user at CodeContext main 91e2b00; in-package half = pin bump (Package.resolved→91e2b00) + UpstreamVisibilityTests.swift compile-visibility probe (plain non-@testable import proves report.records/counts/pending + context.rootDirectory reachable; TDD teeth-check confirmed the internal boundary is enforced). Verified-good local commit: 2b47985 (green 191/191). Not pushed. Checkpoint commits: 2d8b6ff, 2b47985. This was the batch-gating upstream task — unblocks the DiagnosticsBridge (01KXJWKVHSPFD5TYG8B1CRX7KF) and the downstream fusion/CLI/demo chain.'
+  timestamp: 2026-07-16T20:56:13.279200+00:00
+position_column: done
+position_ordinal: 8b80
 title: 'Upstream: expose CodeContext.rootDirectory publicly + bump pin to CodeContextManager revision'
 ---
 ## What
