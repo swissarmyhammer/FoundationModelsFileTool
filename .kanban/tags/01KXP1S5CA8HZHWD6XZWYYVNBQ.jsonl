@@ -1,0 +1,1 @@
+{"id":"01KXP1S5CBYV7AVMV26RHJB3KN","timestamp":"2026-07-16T18:07:20.459584Z","op":"create","item_id":"01KXP1S5CA8HZHWD6XZWYYVNBQ","forward_patch":"--- original\n+++ modified\n@@ -0,0 +1,2 @@\n+color: bfd4f2\n+tag_name: edit-match\n","reverse_patch":"--- original\n+++ modified\n@@ -1,2 +0,0 @@\n-color: bfd4f2\n-tag_name: edit-match\n","transaction_id":null}

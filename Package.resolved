@@ -1,5 +1,5 @@
 {
-  "originHash" : "5bf3fcfc414d92b58c3464cffb3c08fe6609394ae38201fae168aeb6100ae146",
+  "originHash" : "9687c490217af62e9d358f95570d3f05864118f02d100bf5d571ee6aa663f5c0",
   "pins" : [
     {
       "identity" : "foundationmodelscodecontext",
@@ -7,7 +7,7 @@
       "location" : "git@github.com:swissarmyhammer/FoundationModelsCodeContext.git",
       "state" : {
         "branch" : "main",
-        "revision" : "b0b611c6db07150a07345204ed7e0c8098cede64"
+        "revision" : "91e2b0012dd1869bf096ced169342f0be67a5fc5"
       }
     },
     {
@@ -25,7 +25,7 @@
       "location" : "https://github.com/swissarmyhammer/FoundationModelsRanker",
       "state" : {
         "branch" : "main",
-        "revision" : "b3ce6f5db6355da78e8bea7140d029b9ea23487b"
+        "revision" : "cc7a1c3c19d320b976c94380410ef25b2d70ef03"
       }
     },
     {
@@ -61,7 +61,7 @@
       "location" : "https://github.com/swissarmyhammer/mlx-swift-lm",
       "state" : {
         "branch" : "foundationmodels-fixes",
-        "revision" : "c07d6804cf62655f11044461484bc7f0f1c0de8d"
+        "revision" : "cc1728a4aba57fdad44f0e791a2c505dc6459c7f"
       }
     },
     {

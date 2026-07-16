@@ -8,8 +8,45 @@ comments:
     That task has the exact file (Sources/FoundationModelsCodeContext/Diagnostics/DiagnosticRecord.swift), current-visibility facts, change list, acceptance criteria, and a non-@testable visibility test spec.
     Leaving hkq2gff in todo on the FileTool board — it is effectively blocked on CodeContext 2hsy4gh (cross-board, so no depends_on link possible). /finish is skipping it this batch (no in-FileTool-repo work here). It blocks only downstream FileTool task 01KXJWKVHSPFD5TYG8B1CRX7KF, which will stay not-ready until the CodeContext change ships and this card is closed.
   timestamp: 2026-07-15T15:16:43.357851+00:00
-position_column: todo
-position_ordinal: '8180'
+- actor: claude-code
+  id: 01kxnazcf7t8g9ahrn2vvc9gzp
+  text: |-
+    Upstream change filed on the CodeContext board (per user, 2026-07-16). Ran `swift package update` here: CodeContext pin advanced to main 179fc05 — CodeContextManager + public DiagnosticsReport members are present, BUT CodeContext.rootDirectory is STILL `private let` (CodeContext.swift:32) at that revision AND in the local ../FoundationModelsCodeContext working tree (clean). So this task's first acceptance criterion (public nonisolated rootDirectory) is unmet and the in-FileTool visibility-probe test cannot compile yet.
+
+    Filed the required upstream change as a task on the CodeContext board:
+      CodeContext board → short_id hc69gh9, title "Make CodeContext.rootDirectory public (public nonisolated let) for sibling path-rebasing", column todo.
+    It carries the exact change (private let → public nonisolated let rootDirectory), rationale (path-rebasing OUTPUT side), acceptance (public read-only, upstream tests green, committed+pushed to main), a non-@testable read test, and provenance pointing back to hkq2gff. Companion to hc69gh9's predecessor 2hsy4gh (DiagnosticsReport public, done).
+
+    hkq2gff stays parked in todo on the FileTool board — blocked on CodeContext hc69gh9 (cross-board, no depends_on link). /finish is NOT driving it (upstream change is the user's; in-package probe depends on it). When hc69gh9 lands + is pushed to CodeContext main: run `swift package update FoundationModelsCodeContext` here, then re-run /finish to close hkq2gff (implement its UpstreamVisibilityTests probe) and the downstream bridge/fusion/demo chain.
+  timestamp: 2026-07-16T11:28:47.079347+00:00
+- actor: claude-code
+  id: 01kxpa2c523cryqm8qmkt3bnj0
+  text: 'UNBLOCKED (2026-07-16). User made + pushed the upstream change. `swift package update FoundationModelsCodeContext` → pin advanced to main 91e2b00. Verified at that revision: CodeContext.swift:37 is now `public nonisolated let rootDirectory: URL` (with the "nonisolated safe on immutable let" DocC note); public DiagnosticsReport members + CodeContextManager (context(containing:)) also present. All acceptance deps for hkq2gff''s pin criterion are satisfied. Remaining IN-PACKAGE work for this task: (1) confirm Package.resolved pins 91e2b00 (done — grep confirms); (2) write Tests/FileToolTests/UpstreamVisibilityTests.swift — a non-@testable compile-visibility probe constructing CodeContextManager (needs a TextEmbedding → define a trivial throwaway conformance in the test target since NullEmbedder lands in the later bridge task), reading report.records/counts/pending and context.rootDirectory synchronously (no await, no LSP spawn). Driving via /finish now: implement→test→commit→review.'
+  timestamp: 2026-07-16T20:32:10.914592+00:00
+- actor: claude-code
+  id: 01kxpadp51hgxst311pyx0s04x
+  text: |-
+    IMPLEMENTED (in-package probe). Created Tests/FileToolTests/UpstreamVisibilityTests.swift — a plain `import FoundationModelsCodeContext` (NO @testable) compile-visibility probe. Pin confirmed at 91e2b00 (CodeContext.rootDirectory is `public nonisolated let`; DiagnosticsReport.records/counts/pending, DiagnosticRecord, Counts, CodeContextManager all public). Upstream repo untouched; no `swift package update` re-run.
+
+    What the probe touches / how:
+    - Throwaway TextEmbedding: `private struct ProbeEmbedder: TextEmbedding` returning a fixed 1-dim zero vector (NullEmbedder isn't available until the bridge task).
+    - @Test managerIsConstructibleWithPlainImport(): `await CodeContextManager(embedder: ProbeEmbedder())` via the PUBLIC convenience init. No LSP spawn — that init only stores pieces + `await ManagerState()`; a server starts only on context(for:)/context(containing:), which the probe never calls. Reads `manager.state` (public nonisolated).
+    - @Test publicReadPathsAreReachableWithoutTestable(): references two file-scope helpers that are COMPILED but never invoked, so no DiagnosticsReport/CodeContext is constructed and no server spawns:
+      - readReportSurface(_:) reads report.records, report.counts.errors, report.pending, and records.first?.path (DiagnosticRecord field). Note: DiagnosticsReport/DiagnosticRecord/Counts have INTERNAL inits, so a report can only be read (not built) across the plain-import boundary — hence the parameter-taking uncalled helper.
+      - readRootDirectorySynchronously(of:) reads context.rootDirectory SYNCHRONOUSLY (no await), which only compiles because it is `public nonisolated`.
+
+    TDD teeth-check (throwaway, then reverted): temporarily added `DiagnosticsReport(records:[],pending:false)` — plain-import build FAILED with "'DiagnosticsReport' initializer is inaccessible due to 'internal' protection level", proving the plain import genuinely enforces the public/internal boundary and the green is non-vacuous.
+
+    Also: FileToolTests target only declares dependency on "FileTool", but the plain `import FoundationModelsCodeContext` resolves transitively (FileTool links it) — no Package.swift change needed; build/tests confirm it compiles.
+
+    Results: `swift test --filter UpstreamVisibilityTests` → 2/2 green. Full `swift test` → 190 tests/12 suites + 1 integration scaffold test, all green, exit 0. Leaving task in doing for /review.
+  timestamp: 2026-07-16T20:38:21.601419+00:00
+- actor: claude-code
+  id: 01kxpaj5g7bmmtm9e23bcapcfm
+  text: 'Iteration 1: implement landed green. Added Tests/FileToolTests/UpstreamVisibilityTests.swift — compile-visibility probe with PLAIN `import FoundationModelsCodeContext` (NOT @testable), no LSP spawn. private struct ProbeEmbedder: TextEmbedding (GPU-free 1-dim zero vector; production NullEmbedder lands in bridge task). Test 1 managerIsConstructibleWithPlainImport(): constructs CodeContextManager(embedder:) via public async init (stores pieces + awaits ManagerState(); server starts only on context(for:)/context(containing:), never called), reads public nonisolated state. Test 2 publicReadPathsAreReachableWithoutTestable(): references two compiled-but-uninvoked file-scope helpers (so members are visibility-checked without constructing a report/context) — readReportSurface reads report.records/counts.errors/pending + DiagnosticRecord.path; readRootDirectorySynchronously reads context.rootDirectory with NO await (only compiles if public AND nonisolated). TDD teeth-check: temporarily added DiagnosticsReport(records:[],pending:false) → plain-import build FAILED "''DiagnosticsReport'' initializer is inaccessible due to ''internal'' protection level" → proves the boundary is genuinely enforced; reverted before green. Delta also includes Package.resolved pin bump to 91e2b00 (a task acceptance criterion). Did NOT touch upstream repo / re-run swift package update. swift test --filter UpstreamVisibilityTests 2/2; full 190 unit + 1 integration green, double-check PASS. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-16T20:40:48.391439+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'Upstream: expose CodeContext.rootDirectory publicly + bump pin to CodeContextManager revision'
 ---
 ## What

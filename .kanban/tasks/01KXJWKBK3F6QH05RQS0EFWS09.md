@@ -85,11 +85,15 @@ comments:
   id: 01kxmcsb5cqbar4dmjxfny8ezt
   text: 'Iteration 3: all 3 findings fixed at root, byte-identical model-facing strings. (#1 doc sweep) -Note example {find,replace,replaceAll}→{find,replace,replacesAll}; grep confirms only remaining replaceAll is the internal EditEngine.EditArguments(replaceAll:) call (distinct API, correctly kept); also reverted an incidental indentation shift so diff is a pure rename. (#2/#3 enum→wire-string switches as DATA) added private enum StatusName: String + ChangeName: String (String-raw-valued discriminators, read via non-optional .rawValue — the codebase''s own idiom, cf AtomicWriter.LineEnding/TextEncoding consumed as .rawValue in commit); each switch now only routes an engine case to a table member, ZERO string literals. JUDGMENT on associated-value enum: literal [EditEngine.Resolution:String] dict is IMPOSSIBLE (Resolution associated payloads Candidate/NearMiss not Hashable → can''t be dict keys); did NOT use discriminator+dict (would reintroduce a case→discriminator switch + non-exhaustive dict = silent drift risk on model-facing test-asserted strings, and repo has zero force-unwrap/fatalError); String-raw-valued enum works uniformly for both associated-value Resolution and payload-free Change, no new Hashable, non-optional .rawValue, compiler-exhaustive. Byte-identical: anchor/literal/recovered/ambiguous/nearMiss(.noMatch→"nearMiss")/alreadyApplied/consumedTarget + unchanged/expected/actual = prior literals (double-check cross-checked vs verbatim EditFileTests). swift test --filter EditFileTests 22/22, full 188 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T02:41:11.852682+00:00
+- actor: claude-code
+  id: 01kxmd24t432eezv1dm9r4kbs5
+  text: 'DONE. Iteration 3 re-review clean (full 14/0, 0 findings). All review-findings sections resolved. Task moved doing→review→done. Converged in 3 iterations (findings/round: 1→3→0; dimensions bool-naming→doc-rename-spillover+lookup-table; byte-preservation/permissions/atomicity/encoding/chaining CLEAN throughout — correctness never flagged). Wires EditEngine + AtomicWriter + PathGuard + Hashline; encoding/line-ending detect+preserve; write→edit anchor chaining. Verified-good local commit: 3199336 (green 189/189). Not pushed. Checkpoint commits: c494c18, d6ea478, 3199336. Recorded design constraint: @Operation macro can''t map nested edits object-array param (find/replace [String]? cover scalar+parallel; EditEngine retains edits form at engine layer) — flagged for fusion task owner.'
+  timestamp: 2026-07-16T02:46:00.260224+00:00
 depends_on:
 - 01KXJWHT8YA35WZ6GGKA76XPF4
 - 01KXJWJ4C4JY6N54WN9PH3QBQ5
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8a80
 title: 'edit file operation: batch commit with encoding/line-ending preservation'
 ---
 ## What
