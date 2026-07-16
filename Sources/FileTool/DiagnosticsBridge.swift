@@ -335,13 +335,34 @@ public final class DiagnosticsBridge: Sendable {
     /// totals alongside a bounded, useful detail list.
     static let maximumReportedItemCount = 100
 
+    /// The glob metacharacters, in the order the skip note lists them.
+    ///
+    /// The single source of truth behind both ``globMetacharacters`` — the set
+    /// the gate checks — and ``globMetacharacterList`` — the human-readable list
+    /// the skip note renders — so the two can never drift apart.
+    private static let globMetacharacterStrings = ["*", "?", "["]
+
     /// The glob metacharacters a mutated file's absolute path must not contain.
     ///
     /// Upstream treats a `.file` scope containing any of these as a glob, which
     /// can silently resolve to zero targets and read as a false `clean`. A path
     /// carrying one — in the filename or any ancestor directory — is skipped
-    /// before resolution instead.
-    private static let globMetacharacters: Set<Character> = ["*", "?", "["]
+    /// before resolution instead. Built from ``globMetacharacterStrings``.
+    private static let globMetacharacters: Set<Character> = Set(globMetacharacterStrings.flatMap { $0 })
+
+    /// The glob metacharacters rendered as a human-readable list for the skip note.
+    ///
+    /// Derived from ``globMetacharacterStrings`` so the note's parenthetical and
+    /// the gate's ``globMetacharacters`` set are always the same characters.
+    private static var globMetacharacterList: String {
+        guard let last = globMetacharacterStrings.last else {
+            return ""
+        }
+        guard globMetacharacterStrings.count > 1 else {
+            return last
+        }
+        return globMetacharacterStrings.dropLast().joined(separator: ", ") + ", or " + last
+    }
 
     /// Every lowercased file extension handled by an LSP-backed language module.
     ///
@@ -358,15 +379,21 @@ public final class DiagnosticsBridge: Sendable {
 
     // MARK: Notes
 
+    /// The shared suffix every skip note ends with: no diagnostics pass ran.
+    ///
+    /// Extracted so the three skip notes below carry byte-identical wording and
+    /// a change to the phrasing happens in exactly one place.
+    private static let noDiagnosticsPassNote = "— no diagnostics pass"
+
     /// The note on a file skipped because its type has no language server.
-    static let nonDiagnosableNote = "no language server handles this file type — no diagnostics pass"
+    static let nonDiagnosableNote = "no language server handles this file type \(noDiagnosticsPassNote)"
 
     /// The note on a file skipped because its name contains a glob metacharacter.
     static let globMetacharacterNote =
-        "the path contains a glob metacharacter (*, ?, or [), so it cannot be diagnosed as a single file — no diagnostics pass"
+        "the path contains a glob metacharacter (\(globMetacharacterList)), so it cannot be diagnosed as a single file \(noDiagnosticsPassNote)"
 
     /// The note on a file skipped because it is not inside any git workspace.
-    static let notInWorkspaceNote = "not inside a git workspace — no diagnostics pass"
+    static let notInWorkspaceNote = "not inside a git workspace \(noDiagnosticsPassNote)"
 
     /// The note on a report the language server had not finished settling.
     static let pendingReportNote =
