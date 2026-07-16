@@ -84,6 +84,23 @@ public enum Hashline {
         return out
     }
 
+    /// The 1-based line number the first line of whole-file tagged content is numbered from.
+    private static let firstTaggedLineNumber = 1
+
+    /// Tag `content` with absolute hashline anchors, one entry per physical line.
+    ///
+    /// Composes ``tag(lines:startingAtLine:)`` from the first line with
+    /// ``splitLines(_:)``, returning the per-line tagged text a whole-file
+    /// hashline read renders — the single rendering `write file` and `edit file`
+    /// both build their result envelopes from, so a chained `edit file` resolves
+    /// against identical anchors without an intervening read.
+    ///
+    /// - Parameter content: the content to tag.
+    /// - Returns: the tagged lines, empty for empty content.
+    public static func taggedLines(of content: String) -> [String] {
+        splitLines(tag(lines: content, startingAtLine: firstTaggedLineNumber)).map(\.text)
+    }
+
     // MARK: Whole-file freshness token
 
     /// Compute the whole-file freshness token as the lowercase-hex MD5 digest of the full file bytes.

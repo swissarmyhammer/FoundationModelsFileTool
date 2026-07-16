@@ -220,7 +220,7 @@ actor ManagerDiagnosticsResolver: DiagnosticsResolving {
     /// - Returns: the mapped resolved diagnostics.
     private static func resolved(from report: DiagnosticsReport, contextRoot: URL) -> ResolvedDiagnostics {
         ResolvedDiagnostics(
-            records: report.records.map(mappedRecord),
+            records: report.records.map { record in mappedRecord(record: record) },
             errorCount: report.counts.errors,
             warningCount: report.counts.warnings,
             pending: report.pending,
@@ -232,7 +232,7 @@ actor ManagerDiagnosticsResolver: DiagnosticsResolving {
     ///
     /// - Parameter record: the upstream record to map.
     /// - Returns: the FileTool-owned record.
-    private static func mappedRecord(_ record: DiagnosticRecord) -> ResolvedDiagnosticRecord {
+    private static func mappedRecord(record: DiagnosticRecord) -> ResolvedDiagnosticRecord {
         ResolvedDiagnosticRecord(
             relativePath: record.path,
             line: record.range.start.line,
@@ -638,12 +638,27 @@ public final class DiagnosticsBridge: Sendable {
 
     // MARK: Skipped / degraded results
 
+    /// An item-free ``FileDiagnostics`` carrying only `status` and `note`.
+    ///
+    /// The shared builder behind every result that reports no diagnostic items:
+    /// a `skipped` gate outcome and a `pending` degraded outcome differ only in
+    /// their status and note, so both route through here with zero errors, zero
+    /// warnings, and no items.
+    ///
+    /// - Parameters:
+    ///   - status: the wire status the result carries.
+    ///   - note: the explanatory note for the status.
+    /// - Returns: the item-free result.
+    private static func emptyResult(status: DiagnosticsStatus, note: String) -> FileDiagnostics {
+        FileDiagnostics(status: status.rawValue, errors: 0, warnings: 0, items: [], note: note)
+    }
+
     /// A `skipped` ``FileDiagnostics`` carrying `note`.
     ///
     /// - Parameter note: the reason the file was skipped.
     /// - Returns: the skipped result.
     private static func skipped(note: String) -> FileDiagnostics {
-        FileDiagnostics(status: DiagnosticsStatus.skipped.rawValue, errors: 0, warnings: 0, items: [], note: note)
+        emptyResult(status: .skipped, note: note)
     }
 
     /// A `pending` ``FileDiagnostics`` degrading a failed diagnostics pass.
@@ -652,7 +667,7 @@ public final class DiagnosticsBridge: Sendable {
     /// - Returns: the degraded, pending result.
     private static func degraded(error: any Error) -> FileDiagnostics {
         let note = degradedNotePrefix + error.localizedDescription + degradedNoteSuffix
-        return FileDiagnostics(status: DiagnosticsStatus.pending.rawValue, errors: 0, warnings: 0, items: [], note: note)
+        return emptyResult(status: .pending, note: note)
     }
 
     // MARK: Gates

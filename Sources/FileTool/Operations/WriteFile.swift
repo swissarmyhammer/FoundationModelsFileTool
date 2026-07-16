@@ -132,32 +132,13 @@ extension WriteFile {
     ///
     /// - Parameter content: the content to check.
     /// - Returns: the ``overSizeMessage`` when `content` is over the cap, else `nil`.
-    private static func contentSizeViolation(_ content: String) -> String? {
+    private static func contentSizeViolation(content: String) -> String? {
         content.utf8.count > maximumContentByteCount ? overSizeMessage : nil
     }
 
     /// The corrective message naming the content-size cap.
     private static var overSizeMessage: String {
         "The `content` parameter must be at most \(maximumContentMebibytes) MiB (\(maximumContentByteCount) bytes)."
-    }
-
-    // MARK: Hashline tagging
-
-    /// The 1-based line number assigned to the first line of tagged content.
-    private static let firstLineNumber = 1
-
-    /// Tag `content` with absolute hashline anchors, one entry per line.
-    ///
-    /// Uses ``Hashline/tag(lines:startingAtLine:)`` from the first line and then
-    /// splits into per-line entries, exactly as `read file` renders a whole-file
-    /// hashline read, so the write envelope's anchors match a later read of the
-    /// same path.
-    ///
-    /// - Parameter content: the written content.
-    /// - Returns: the tagged lines, empty for empty content.
-    private static func tagged(content: String) -> [String] {
-        let tagged = Hashline.tag(lines: content, startingAtLine: firstLineNumber)
-        return Hashline.splitLines(tagged).map(\.text)
     }
 
     // MARK: Corrective messages
@@ -184,7 +165,7 @@ extension WriteFile {
     /// - Returns: the ``WriteOutput/content(_:)`` on success, or a
     ///   ``WriteOutput/corrective(_:)`` message the model can act on.
     public func execute(in context: FileContext) async throws -> WriteOutput {
-        if let message = Self.contentSizeViolation(content) { return .corrective(message) }
+        if let message = Self.contentSizeViolation(content: content) { return .corrective(message) }
 
         let url: URL
         switch context.pathGuard.validate(filePath, for: .write) {
@@ -207,7 +188,7 @@ extension WriteFile {
                 path: url.path,
                 bytesWritten: data.count,
                 hash: Hashline.wholeFileHash(bytes: data),
-                taggedContent: Self.tagged(content: content),
+                taggedContent: Hashline.taggedLines(of: content),
                 diagnostics: diagnostics
             )
         )

@@ -384,24 +384,6 @@ extension EditFile {
     /// The whole-batch status of a successfully applied batch.
     private static let appliedStatus = "applied"
 
-    // MARK: Hashline tagging
-
-    /// The 1-based line number assigned to the first line of tagged content.
-    private static let firstLineNumber = 1
-
-    /// Tag `content` with absolute hashline anchors, one entry per line.
-    ///
-    /// Uses ``Hashline/tag(lines:startingAtLine:)`` from the first line and then
-    /// splits into per-line entries, exactly as `write file` builds its envelope
-    /// and `read file` renders a whole-file hashline read, so a chained edit
-    /// resolves against the same anchors.
-    ///
-    /// - Parameter content: the committed content.
-    /// - Returns: the tagged lines, empty for empty content.
-    private static func tagged(content: String) -> [String] {
-        Hashline.splitLines(Hashline.tag(lines: content, startingAtLine: firstLineNumber)).map(\.text)
-    }
-
     // MARK: Execution
 
     /// Edits the file and returns the edit result or a corrective message.
@@ -432,11 +414,11 @@ extension EditFile {
         do {
             data = try Data(contentsOf: url)
         } catch {
-            return .corrective(Self.pathErrorMessage(Self.unreadableDescription, path: filePath))
+            return .corrective(Self.pathErrorMessage(description: Self.unreadableDescription, path: filePath))
         }
 
         guard let decoded = AtomicWriter.decode(data) else {
-            return .corrective(Self.pathErrorMessage(Self.binaryDescription, path: filePath))
+            return .corrective(Self.pathErrorMessage(description: Self.binaryDescription, path: filePath))
         }
         let lineEnding = AtomicWriter.detectLineEnding(in: decoded.text)
 
@@ -510,7 +492,7 @@ extension EditFile {
         do {
             try AtomicWriter.write(data, to: url)
         } catch {
-            return .corrective(Self.pathErrorMessage(Self.commitFailureDescription, path: path))
+            return .corrective(Self.pathErrorMessage(description: Self.commitFailureDescription, path: path))
         }
         let diagnostics = await context.diagnostics.diagnose(fileAt: url)
         return .content(
@@ -523,7 +505,7 @@ extension EditFile {
                 encoding: decoded.encoding.rawValue,
                 lineEndings: lineEnding?.rawValue,
                 hash: Hashline.wholeFileHash(bytes: data),
-                taggedContent: tagged(content: content),
+                taggedContent: Hashline.taggedLines(of: content),
                 diagnostics: diagnostics
             )
         )
@@ -676,7 +658,7 @@ extension EditFile {
     ///   - description: the leading description of what went wrong.
     ///   - path: the requested path.
     /// - Returns: the corrective message.
-    private static func pathErrorMessage(_ description: String, path: String) -> String {
+    private static func pathErrorMessage(description: String, path: String) -> String {
         "\(description): \(path)"
     }
 }

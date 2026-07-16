@@ -143,11 +143,28 @@ import FoundationModelsCodeContext
         let fake = FakeResolver(workspaces: [(Self.projectRoot, Self.oneRecord(severity: .error))])
         let bridge = Self.makeBridge(resolver: fake)
 
-        let result = await bridge.diagnose(fileAt: URL(fileURLWithPath: "/session/projectA/README.md"))
+        // A non-canonical, uppercase `.MD` spelling exercises the extension
+        // normalization on the skip path: `isDiagnosableExtension` lowercases
+        // before its set check, so `.MD` normalizes to `.md` and is skipped.
+        let result = await bridge.diagnose(fileAt: URL(fileURLWithPath: "/session/projectA/README.MD"))
 
         #expect(result?.status == "skipped")
         #expect(result?.note == DiagnosticsBridge.nonDiagnosableNote)
         #expect(await fake.diagnoseCallCount == 0)
+    }
+
+    @Test func uppercaseDiagnosableExtensionIsNormalizedAndResolved() async {
+        // An uppercase `.SWIFT` must normalize to `.swift` and be admitted on
+        // the diagnosable path — if the gate did not lowercase, `.SWIFT` would
+        // miss the set and be skipped without ever resolving. Proving it
+        // resolves (callCount 1, non-skipped status) proves normalization runs.
+        let fake = FakeResolver(workspaces: [(Self.projectRoot, Self.clean())])
+        let bridge = Self.makeBridge(resolver: fake)
+
+        let result = await bridge.diagnose(fileAt: URL(fileURLWithPath: "/session/projectA/Sources/Alpha.SWIFT"))
+
+        #expect(result?.status == "clean")
+        #expect(await fake.diagnoseCallCount == 1)
     }
 
     @Test(arguments: ["Glob*.swift", "Query?.swift", "Array[0].swift"])
