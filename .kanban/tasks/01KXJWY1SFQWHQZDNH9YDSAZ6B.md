@@ -33,6 +33,25 @@ comments:
   id: 01kxm4rtzf9pfzwsm3nbp12xvy
   text: 'Iteration 1: implement landed green. EditMatch.swift — findMatch(find:in:)->MatchResult + similarity(_:_:). Four-rung ladder as DATA: ordered private ladder:[LadderRung] (exact→normalized→anchor→fuzzy) driven by ONE cascade loop, each rung a named strategy stamped with its Rung. UTF-8 byte-offset ranges (Range<Int>) for exact byte-range parity w/ Rust; similarity/levenshtein over Unicode scalars (Rust char). MatchResult = unique(range,rung,confidence)|ambiguous(candidates:[Span])|noMatch(near:[Span]); Span(range/startLine/endLine/text) = structured near-miss. Pure, no I/O. Mirrored Rust src/lib.rs + all 4 test files: single-line exact line-aligned; str::lines()≡physicalLines one splitter; trim_trailing_empty; anchor needs 2 unique non-empty first/last w/ end>start; fuzzy stable descending sort w/ explicit index tiebreaker (Swift sort not stable); accept floor = threshold−epsilon; near = prefix(3).filter(>0). Fixtures generated FROM Rust via throwaway examples/editmatch_dump.rs (cargo run --example), example deleted, Rust repo confirmed byte-clean (git status --porcelain empty). EditMatchTests.swift 15 tests (per-rung parity exact/normalized/crlf/anchor/fuzzy/ambiguous/noMatch/empty/combined; similarity golden; byte-preservation incl indentation+CRLF; near-miss quality; ambiguous-never-silent) + Fixtures/edit-match-golden.json (26 cases + 11 similarity vectors). double-check PASS (line-by-line Rust cross-check). swift test --filter EditMatchTests 15/15; full 142 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T00:21:06.671732+00:00
+- actor: claude-code
+  id: 01kxm56p3qxwrv5kmj3gfhqwyk
+  text: 'Iteration 1 review: full pass 14/0. ALGORITHM CORRECTNESS CLEAN — rung parity, byte-range preservation, near-miss/ambiguous handling all 0 findings. 2 confirmed findings, both clarity/idiom in EditMatch.swift: (1) :375 normalize hand-rolls whitespace trim via scalar slicing + isTrimmable helper → use text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r")) and drop the now-unused helper; (2) :402 trimmingTrailingEmpty hand-rolls trailing-empty removal via manual indexing → idiomatic drop-while-empty (reviewer noted Swift has NO dropLast(while:), use reverse drop(while:)+reverse — so NOT a contradiction, normal fixable). CAUTION for iter 2: this is an algorithm-EXACT port with byte parity; the stdlib swaps are acceptable ONLY if provably byte-identical to the current (Rust-mirrored) logic — same exact trimmed char set (" \t\r"), same edges/semantics. The 26 golden fixtures + byte-preservation tests are the guard; if a stdlib idiom would change behavior vs Rust parity, keep the explicit logic and report the tension. Looping to /implement iteration 2 — verify golden fixtures stay green after the swaps.'
+  timestamp: 2026-07-16T00:28:40.439774+00:00
+- actor: claude-code
+  id: 01kxm5b301dnyafcwrqf9pjnwc
+  text: |-
+    Iteration 2: worked the 2 review findings in EditMatch.swift, both byte-identical clarity swaps (confirmed against Rust src/lib.rs before touching code).
+
+    Finding 1 (normalize): replaced hand-rolled scalar leading/trailing trim + isTrimmable helper with `text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))`; deleted the now-unused isTrimmable. Rust is `s.trim_matches([' ', '\t', '\r'])` — CharacterSet(charactersIn:) matches by Unicode scalar, so exactly space/tab/CR trimmed at both edges, same set, same result. Foundation already imported.
+
+    Finding 2 (trimmingTrailingEmpty): replaced manual `while end>0, lines[end-1].isEmpty` indexing with `Array(lines.reversed().drop(while: { $0.isEmpty }).reversed())`. Note: Swift stdlib has NO dropLast(while:), so used reverse/drop(while:)/reverse per the reviewer's own guidance — drops only trailing empties, preserves interior empties, identical sequence to Rust trim_trailing_empty.
+
+    Both findings flipped to [x]. swift test --filter EditMatchTests 15/15 green (all golden parity fixtures + byte-preservation tests pass). Full swift test: 142 tests/9 suites + integration 1/1, exit 0, zero warnings. Parity preserved. Running adversarial double-check; leaving task in doing for /review.
+  timestamp: 2026-07-16T00:31:04.705713+00:00
+- actor: claude-code
+  id: 01kxm5fhpgdjnvjzb4r81gv1ga
+  text: 'Iteration 2: both findings fixed, byte-identical parity verified. (1) normalize: replaced hand-rolled scalar trim + isTrimmable helper with text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r")); deleted orphaned isTrimmable. PARITY: Rust is s.trim_matches(['' '',''\t'',''\r'']); CharacterSet has exactly U+0020/U+0009/U+000D (NOT .whitespaces/.whitespacesAndNewlines, so \n/FF/NBSP/unicode-spaces correctly untrimmed); trims both edges per scalar (= Rust char); normalize only fed physical-line text (no \n) so no \r\n grapheme edge case reachable — same set/edges/result. (2) trimmingTrailingEmpty: replaced manual index/while with Array(lines.reversed().drop(while:{$0.isEmpty}).reversed()) — drops only trailing empties, preserves interior (= Rust trim_trailing_empty). double-check PASS (confirmed trim set, trailing semantics, no orphaned code, Foundation imported for CharacterSet). swift test --filter EditMatchTests 15/15 (26 golden fixtures + byte-preservation CRLF/indentation green), full 142 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-16T00:33:30.832693+00:00
 depends_on:
 - 01KXJWG0E2246T5Y42D8N71Z1G
 position_column: doing
@@ -56,3 +75,8 @@ Split out of EditEngine per plan risk §9.4 (the ladder is subtle — port rungs
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-15 19:23)
+
+- [x] `Sources/FileTool/EditMatch.swift:375` — The `normalize` function manually implements whitespace trimming (removing ' ', '\t', '\r' from both ends) using Unicode scalar slicing and a helper predicate, while Swift's standard library provides `String.trimmingCharacters(in:)` that does exactly this more idiomatically and with better maintenance. Replace the function body with `return text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))` and remove the unused `isTrimmable` helper function.
+- [x] `Sources/FileTool/EditMatch.swift:402` — The `trimmingTrailingEmpty` function manually implements removal of trailing empty strings from an array using manual indexing and a while loop, while Swift's standard library provides `Sequence.dropLast(while:)` that does exactly this more idiomatically. Replace with: `return Array(lines.dropLast(while: { $0.isEmpty }))`.

@@ -460,10 +460,7 @@ public enum EditMatch {
     /// - Parameter text: the line text to normalize.
     /// - Returns: the trimmed text.
     private static func normalize(_ text: String) -> String {
-        var scalars = text.unicodeScalars[...]
-        while let first = scalars.first, isTrimmable(first) { scalars = scalars.dropFirst() }
-        while let last = scalars.last, isTrimmable(last) { scalars = scalars.dropLast() }
-        return String(String.UnicodeScalarView(scalars))
+        text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))
     }
 
     /// Normalize a possibly-multiline `find` into one comparison string.
@@ -478,19 +475,12 @@ public enum EditMatch {
         lines(of: find).map(normalize).joined(separator: "\n")
     }
 
-    /// Whether a scalar is trimmable horizontal whitespace or a carriage return.
-    private static func isTrimmable(_ scalar: Unicode.Scalar) -> Bool {
-        scalar == " " || scalar == "\t" || scalar == "\r"
-    }
-
     /// Strip trailing all-whitespace (normalized-empty) lines from an array.
     ///
     /// - Parameter lines: the normalized lines.
     /// - Returns: the prefix with trailing empty lines removed.
     private static func trimmingTrailingEmpty(_ lines: [String]) -> [String] {
-        var end = lines.count
-        while end > 0, lines[end - 1].isEmpty { end -= 1 }
-        return Array(lines[..<end])
+        Array(lines.reversed().drop(while: { $0.isEmpty }).reversed())
     }
 
     // MARK: Span construction
