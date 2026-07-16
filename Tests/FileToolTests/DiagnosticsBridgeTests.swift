@@ -335,6 +335,50 @@ import FoundationModelsCodeContext
         #expect(result?.items.first?.file == "projectA/Sources/Alpha.swift")
     }
 
+    @Test(arguments: [
+        // `..` traversal that collapses above the context root.
+        "../../etc/passwd",
+        // A leading-slash absolute path (points anywhere on the machine).
+        "/etc/passwd",
+        // Deeper traversal mixed with real components.
+        "Sources/../../../etc/passwd",
+        // A bare parent reference and a current-directory reference.
+        "..",
+        "foo/..",
+        "a/./b",
+    ])
+    func traversalInRecordPathCannotEscapeSessionRoot(_ maliciousPath: String) async {
+        // A `DiagnosticRecord.path` is untrusted input from the upstream language
+        // server. A malicious path — a `..` traversal, a leading-slash absolute
+        // path, or a `.`/`..` component — must never yield an item path that is
+        // absolute or that resolves outside the session root, because the model
+        // may feed the item path straight into a subsequent file operation.
+        let resolved = Self.oneRecord(
+            severity: .error,
+            relativePath: maliciousPath,
+            contextRoot: Self.projectRoot
+        )
+        let fake = FakeResolver(workspaces: [(Self.projectRoot, resolved)])
+        let bridge = Self.makeBridge(resolver: fake)
+
+        let result = await bridge.diagnose(fileAt: Self.swiftFileInProjectA)
+
+        let file = try! #require(result?.items.first?.file)
+        // The item path must not be an absolute path (which could point anywhere
+        // on the machine, e.g. `/etc/passwd`).
+        #expect(!file.hasPrefix("/"))
+        // Interpreted as a session-root-relative path, it must resolve to a
+        // location within the session root — never above or outside it.
+        let resolvedWithinSession = Self.sessionRoot
+            .appendingPathComponent(file)
+            .standardizedFileURL
+            .path
+        #expect(
+            resolvedWithinSession == Self.sessionRoot.path
+                || resolvedWithinSession.hasPrefix(Self.sessionRoot.path + "/")
+        )
+    }
+
     // MARK: Per-file routing across two roots
 
     @Test func filesRouteToTheirRespectiveWorkspaces() async {

@@ -668,24 +668,95 @@ public final class DiagnosticsBridge: Sendable {
     /// Rebases a context-root-relative record path to session-root-relative.
     ///
     /// Joins the record path onto the resolved context root to recover the
-    /// absolute path, then relativizes it against the session root. Falls back to
-    /// the absolute path when the file is not under the session root (which
-    /// should not happen for a mutation confined to the session).
+    /// absolute path, then relativizes it against the session root.
+    ///
+    /// The record path is **untrusted input** from the upstream language server,
+    /// so it is validated by ``isTraversalSafeRecordPath(_:)`` before any join.
+    /// A path that fails that check — one that is absolute or carries a `.` or
+    /// `..` component — is *not* joined: joining a `..`-laden path and
+    /// standardizing it would collapse the `..` and escape the resolved context
+    /// (and thus the session) root, and the escaped *absolute* path would then
+    /// be handed to the model for a later file operation. Instead the path is
+    /// reduced by ``sanitizedRelativePath(_:)`` to a leading-slash-free,
+    /// traversal-free relative string that — appended to any base — can never
+    /// resolve outside it. This upholds the invariant that **no item path this
+    /// method returns is absolute or resolves outside the session root**, even
+    /// for a hostile input such as `/etc/passwd` or `../../etc/passwd`.
+    ///
+    /// The same sanitizing fallback also covers the (architecturally impossible
+    /// for a mutation confined to the session) case where a traversal-safe path
+    /// nonetheless does not resolve under the session root, so no branch ever
+    /// emits an escaping path.
     ///
     /// - Parameters:
-    ///   - recordPath: the record path, relative to `contextRoot`.
+    ///   - recordPath: the untrusted record path, relative to `contextRoot`.
     ///   - contextRoot: the resolved context's root.
-    /// - Returns: the path relative to the session root, or the absolute path as a fallback.
+    /// - Returns: the path relative to the session root, or — for an unsafe or
+    ///   non-session-rooted path — a sanitized, traversal-free relative path.
     private func sessionRelativePath(forRecordPath recordPath: String, contextRoot: URL) -> String {
+        guard Self.isTraversalSafeRecordPath(recordPath) else {
+            return Self.sanitizedRelativePath(recordPath)
+        }
         let absolute = contextRoot.appendingPathComponent(recordPath).standardizedFileURL
         let sessionComponents = sessionRoot.standardizedFileURL.pathComponents
         let absoluteComponents = absolute.pathComponents
         guard absoluteComponents.count > sessionComponents.count,
               Array(absoluteComponents.prefix(sessionComponents.count)) == sessionComponents
         else {
-            return absolute.path
+            return Self.sanitizedRelativePath(recordPath)
         }
         return absoluteComponents.suffix(from: sessionComponents.count).joined(separator: "/")
+    }
+
+    /// The path components that make a record path unsafe to join and rebase.
+    ///
+    /// A relative record path is safe to join onto the context root only when it
+    /// contains none of these components: `..` (parent traversal, the escape
+    /// vector) and `.` (current-directory reference). Both are rejected because
+    /// a legitimate workspace-relative path from the language server contains
+    /// neither, so their presence signals an untrusted or malformed path.
+    private static let unsafeRecordPathComponents: Set<Substring> = ["..", "."]
+
+    /// Whether an untrusted context-relative record path is safe to rebase.
+    ///
+    /// A record path is safe only when it is genuinely relative and stays within
+    /// its context root: it must not be absolute (a leading `/`), and must
+    /// contain no ``unsafeRecordPathComponents`` — a `.` or `..` component that,
+    /// once joined and standardized, could resolve outside the context (and thus
+    /// the session) root. This is a pure string check with no filesystem access:
+    /// it deliberately does not reuse ``PathGuard``'s validation, which
+    /// canonicalizes against the filesystem and rejects symlinks, because the
+    /// rebase must stay a side-effect-free path transformation.
+    ///
+    /// - Parameter recordPath: the untrusted context-relative record path.
+    /// - Returns: `true` when the path is a safe relative path, `false` otherwise.
+    private static func isTraversalSafeRecordPath(_ recordPath: String) -> Bool {
+        guard !recordPath.hasPrefix("/") else { return false }
+        let components = recordPath.split(separator: "/", omittingEmptySubsequences: true)
+        return !components.contains { unsafeRecordPathComponents.contains($0) }
+    }
+
+    /// Reduces an untrusted record path to a traversal-free relative string.
+    ///
+    /// Splits on `/` (dropping the leading slash of an absolute path and every
+    /// empty component) and discards every ``unsafeRecordPathComponents`` (`.`
+    /// and `..`), keeping only ordinary name components joined by `/`. The
+    /// result is therefore never absolute and carries no `..`, so appended to
+    /// any base directory it can never resolve outside that base — the safe
+    /// fallback the session-root rebase relies on for hostile input. An input
+    /// with no ordinary components (for example a bare `..`) reduces to the
+    /// empty string, which resolves to the session root itself and so is still
+    /// contained. Downstream this defused value is additionally bounded by
+    /// ``PathGuard``'s workspace-boundary check, but its safety does not depend
+    /// on that second layer.
+    ///
+    /// - Parameter recordPath: the untrusted record path to sanitize.
+    /// - Returns: a leading-slash-free, `..`-free relative path.
+    private static func sanitizedRelativePath(_ recordPath: String) -> String {
+        recordPath
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .filter { component in !unsafeRecordPathComponents.contains(component) }
+            .joined(separator: "/")
     }
 
     // MARK: Skipped / degraded results
