@@ -37,11 +37,15 @@ comments:
   id: 01kxm8qc6z2735c9yp8jmj2rzn
   text: 'Iteration 2: finding fixed at root, behavior byte-identical. Added shared core candidate(occurrence:line:text:in:) — now the ONLY place Candidate is constructed (builds Candidate(occurrence,line,text,context: contextLines(around:line))). span variant delegates w/ span.startLine + span.text; line variant delegates w/ line + lineText(at:in:). Duplicated Candidate(...) construction eliminated. Byte-identical both paths (same line/text/±2 context as prior inline). Swept: no other near-dup builders (candidate(forByteRange:) already routes through line variant; competingCandidates/literalCandidates assemble via these, inherit the fold). swift test --filter EditEngineTests 24/24, full 166 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T01:30:13.087012+00:00
+- actor: claude-code
+  id: 01kxm93qe74h7pf518yyaxcr6w
+  text: 'DONE. Iteration 2 re-review clean (full 14/0, 0 findings, prior dup finding refuted/resolved). Task moved doing→review→done. Converged in 2 iterations (findings/round: 1→0) — cascade-order/never-guess/batch-short-circuit logic clean on iteration 1, only a candidate-builder dedup needed. Composes Hashline (anchor) + EditMatch (ladder). Verified-good local commit: 3e10297 (green 167/167). Not pushed. Checkpoint commits: 554c841, 3e10297.'
+  timestamp: 2026-07-16T01:36:57.799295+00:00
 depends_on:
 - 01KXJWGS1DPP92870X79GPX96T
 - 01KXJWY1SFQWHQZDNH9YDSAZ6B
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8980'
 title: 'EditEngine core: normalization + resolution cascade (pure, no I/O)'
 ---
 ## What
