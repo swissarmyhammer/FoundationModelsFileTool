@@ -525,12 +525,6 @@ public final class DiagnosticsBridge: Sendable {
         }
     }
 
-    /// Best-effort shuts the resolver's open workspaces down when the bridge is released.
-    deinit {
-        let resolver = self.resolver
-        Task { await resolver.shutdown() }
-    }
-
     // MARK: Diagnosing
 
     /// Diagnoses a just-mutated file, folding the result into a ``FileDiagnostics``.
@@ -589,6 +583,19 @@ public final class DiagnosticsBridge: Sendable {
     }
 
     /// Closes every workspace the resolver has open.
+    ///
+    /// This is the bridge's structured teardown and the primary way its
+    /// `CodeContextManager` — and thus every open `CodeContext` and its language
+    /// server — is shut down. The owner (a ``FileContext`` via
+    /// ``FileContext/stop()``, or whatever else holds the bridge) must call it
+    /// before releasing the bridge. It is safe to call when the manager was never
+    /// created (then a no-op) and on a ``Mode/disabled`` bridge.
+    ///
+    /// The bridge deliberately does *not* shut down in `deinit`: a `deinit` is
+    /// synchronous and cannot `await`, so the only way to reach the async
+    /// resolver shutdown from there would be an unstructured, unawaited
+    /// `Task` — which leaks and may not even run before the process exits.
+    /// Structured teardown through this method replaces that.
     public func stop() async {
         await resolver.shutdown()
     }

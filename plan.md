@@ -240,7 +240,10 @@ wraps one lazily-created `CodeContextManager<ProcessLanguageServerConnection>` �
 `CodeContext` — and resolves the covering context *per mutated file*. The manager is created
 on the first mutation of a diagnosable file (a `.disabled` bridge never creates it; an
 `eagerWarmup: true` bridge warms the project enclosing the session root at creation instead)
-and shut down — closing every open context — on `stop()` / `deinit`.
+ and shut down — closing every open context — on the explicit async `stop()`
+  (forwarded from `FileContext.stop()`, which the session owner calls before releasing
+  the context). Teardown is deliberately explicit, not tied to `deinit`: a synchronous
+  `deinit` cannot `await` the async shutdown without leaking an unstructured task.
 
 - After a committed `write file` / `edit file` of a diagnosable file (extension mapped to an
   LSP-backed `Languages.all` module — Swift via `sourcekit-lsp`, Rust, Python, TypeScript, Go,

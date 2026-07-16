@@ -447,6 +447,21 @@ import FoundationModelsCodeContext
         #expect(bridge.warmUpTask == nil)
         #expect(await fake.warmUpCallCount == 0)
     }
+
+    // MARK: Structured teardown
+
+    @Test func stopClosesEveryOpenWorkspaceViaTheResolver() async {
+        // `stop()` is the bridge's structured teardown — the explicit path that
+        // replaces the old fire-and-forget `deinit` shutdown. It must forward to
+        // the resolver's `shutdown()` exactly once, so the owner closing the
+        // session closes every open `CodeContext`.
+        let fake = FakeResolver(workspaces: [(Self.projectRoot, Self.clean())])
+        let bridge = Self.makeBridge(resolver: fake)
+
+        await bridge.stop()
+
+        #expect(await fake.shutdownCallCount == 1)
+    }
 }
 
 /// A fake ``DiagnosticsResolving`` keyed by path prefix, recording the
@@ -491,6 +506,9 @@ private actor FakeResolver: DiagnosticsResolving {
 
     /// The roots successfully resolved, in order.
     private(set) var resolvedRoots: [URL] = []
+
+    /// The number of ``shutdown()`` calls.
+    private(set) var shutdownCallCount = 0
 
     /// Creates a fake resolver.
     ///
@@ -540,5 +558,7 @@ private actor FakeResolver: DiagnosticsResolving {
         resolvedRoots
     }
 
-    func shutdown() async {}
+    func shutdown() async {
+        shutdownCallCount += 1
+    }
 }

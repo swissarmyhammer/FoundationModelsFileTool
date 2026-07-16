@@ -61,4 +61,21 @@ public final class FileContext: Sendable {
         self.pathGuard = PathGuard(root: root, workspaceRoot: root, allowSymlinks: allowSymlinks)
         self.diagnostics = DiagnosticsBridge(root: root, eagerWarmup: eagerWarmup)
     }
+
+    /// Tears the session down, closing every workspace the diagnostics bridge opened.
+    ///
+    /// This is the session's structured teardown: the owner calls it when it is
+    /// done with the context, before releasing it. It forwards to
+    /// ``DiagnosticsBridge/stop()``, which shuts the bridge's `CodeContextManager`
+    /// down and closes every open `CodeContext` and its language server. It is
+    /// safe to call when no diagnosable mutation ever started the manager (then a
+    /// no-op) and on a ``DiagnosticsBridge/Mode/disabled`` bridge.
+    ///
+    /// Teardown is deliberately explicit rather than tied to `deinit`: releasing
+    /// the context does not shut the manager down, because a synchronous `deinit`
+    /// cannot `await` the async shutdown without leaking an unstructured task.
+    /// A session owner must call this before dropping the context.
+    public func stop() async {
+        await diagnostics.stop()
+    }
 }
