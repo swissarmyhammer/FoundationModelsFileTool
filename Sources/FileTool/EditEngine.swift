@@ -747,6 +747,33 @@ public enum EditEngine {
         candidate(occurrence: occurrence, line: lineNumber(ofByteOffset: range.lowerBound, in: working), in: workingLines)
     }
 
+    /// Build a candidate at a 1-based line, carrying an explicit focal text.
+    ///
+    /// This is the single point where a ``Candidate`` is constructed: every other
+    /// candidate builder narrows down to this core by supplying the focal `line`
+    /// and its `text`, and the ±``contextRadius`` context is always taken around
+    /// that same line.
+    ///
+    /// - Parameters:
+    ///   - occurrence: the candidate's 1-based position in the list.
+    ///   - line: the 1-based focal line.
+    ///   - text: the focal line's text.
+    ///   - workingLines: the working copy's per-line texts.
+    /// - Returns: the candidate with the given focal text and surrounding context.
+    private static func candidate(
+        occurrence: Int,
+        line: Int,
+        text: String,
+        in workingLines: [String]
+    ) -> Candidate {
+        Candidate(
+            occurrence: occurrence,
+            line: line,
+            text: text,
+            context: contextLines(around: line, in: workingLines)
+        )
+    }
+
     /// Build a candidate for an ``EditMatch/Span`` from a ladder tie.
     ///
     /// - Parameters:
@@ -755,12 +782,7 @@ public enum EditEngine {
     ///   - workingLines: the working copy's per-line texts.
     /// - Returns: the candidate located at the span's start line, carrying the span's text.
     private static func candidate(occurrence: Int, span: EditMatch.Span, in workingLines: [String]) -> Candidate {
-        Candidate(
-            occurrence: occurrence,
-            line: span.startLine,
-            text: span.text,
-            context: contextLines(around: span.startLine, in: workingLines)
-        )
+        candidate(occurrence: occurrence, line: span.startLine, text: span.text, in: workingLines)
     }
 
     /// Build a candidate at a 1-based line, taking its focal text from the working lines.
@@ -771,12 +793,7 @@ public enum EditEngine {
     ///   - workingLines: the working copy's per-line texts.
     /// - Returns: the candidate with focal text and surrounding context.
     private static func candidate(occurrence: Int, line: Int, in workingLines: [String]) -> Candidate {
-        Candidate(
-            occurrence: occurrence,
-            line: line,
-            text: lineText(at: line, in: workingLines),
-            context: contextLines(around: line, in: workingLines)
-        )
+        candidate(occurrence: occurrence, line: line, text: lineText(at: line, in: workingLines), in: workingLines)
     }
 
     /// The context lines within ``contextRadius`` of a focal line, excluding the focal line itself.
