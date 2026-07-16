@@ -7,7 +7,7 @@ import Testing
 /// Behavioral tests for the ``EditFile`` operation.
 ///
 /// Every case in the `edit file` plan row is exercised through the real
-/// operation against files on disk: single / `replaceAll` / `occurrence` edits;
+/// operation against files on disk: single / `replacesAll` / `occurrence` edits;
 /// a multi-pair parallel-array batch; CRLF and UTF-8-BOM round-trips asserting
 /// the bytes outside the edited range stay identical (BOM intact, CRLF
 /// preserved); mixed line endings reported; the executable bit preserved across
@@ -28,20 +28,20 @@ import Testing
     ///   - filePath: the path of the file to edit.
     ///   - find: the `find` values (a one-element array is a scalar find).
     ///   - replace: the `replace` values.
-    ///   - replaceAll: whether every occurrence is rewritten.
+    ///   - replacesAll: whether every occurrence is rewritten.
     ///   - occurrence: the 1-based occurrence selector.
     /// - Returns: the decoded ``EditFile`` operation.
     private static func makeOperation(
         filePath: String,
         find: [String]? = nil,
         replace: [String]? = nil,
-        replaceAll: Bool? = nil,
+        replacesAll: Bool? = nil,
         occurrence: Int? = nil
     ) throws -> EditFile {
         var properties: [(String, any ConvertibleToGeneratedContent)] = [("filePath", filePath)]
         if let find { properties.append(("find", find)) }
         if let replace { properties.append(("replace", replace)) }
-        if let replaceAll { properties.append(("replaceAll", replaceAll)) }
+        if let replacesAll { properties.append(("replacesAll", replacesAll)) }
         if let occurrence { properties.append(("occurrence", occurrence)) }
         return try EditFile(GeneratedContent(properties: properties, uniquingKeysWith: { _, new in new }))
     }
@@ -91,7 +91,7 @@ import Testing
     /// The UTF-8 byte-order-mark bytes (`EF BB BF`).
     private static let utf8ByteOrderMark = Data([0xEF, 0xBB, 0xBF])
 
-    // MARK: Single / replaceAll / occurrence
+    // MARK: Single / replacesAll / occurrence
 
     @Test func singleEditReplacesTheMatchedText() async throws {
         let (context, _, path) = try Self.makeContext(seeding: Data("alpha\nbeta\ngamma\n".utf8))
@@ -104,9 +104,9 @@ import Testing
         #expect(try Self.readBytes(path) == Data("alpha\nBETA\ngamma\n".utf8))
     }
 
-    @Test func replaceAllRewritesEveryOccurrence() async throws {
+    @Test func replacesAllRewritesEveryOccurrence() async throws {
         let (context, _, path) = try Self.makeContext(seeding: Data("x\nx\nx\n".utf8))
-        let output = try await Self.makeOperation(filePath: path, find: ["x"], replace: ["y"], replaceAll: true)
+        let output = try await Self.makeOperation(filePath: path, find: ["x"], replace: ["y"], replacesAll: true)
             .execute(in: context)
         let result = try #require(output.resultValue)
 

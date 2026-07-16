@@ -301,7 +301,7 @@ public enum EditOutput: CorrectiveEncodable, Sendable {
 ///
 /// - Note: The `find` / `replace` arguments are `[String]` (a one-element array
 ///   is a scalar find; parallel arrays are a multi-pair batch), plus the scalar
-///   ``replaceAll`` and ``occurrence`` disambiguators. The richer per-entry
+    ///   ``replacesAll`` and ``occurrence`` disambiguators. The richer per-entry
 ///   `edits` object-array form ``EditEngine`` supports is not a model-facing
 ///   parameter here: the `@Operation` macro maps only primitive and
 ///   primitive-array parameter types, so a nested `{find, replace, replaceAll}`
@@ -319,7 +319,7 @@ public struct EditFile: Sendable {
     public var replace: [String]?
 
     /// Whether every occurrence of each `find` is rewritten rather than a single one; absent means the default (`false`).
-    public var replaceAll: Bool?
+    public var replacesAll: Bool?
 
     /// The 1-based occurrence selector that disambiguates among literal candidates, or `nil` for none.
     public var occurrence: Int?
@@ -328,8 +328,8 @@ public struct EditFile: Sendable {
 extension EditFile {
     // MARK: Parameter defaults
 
-    /// The `replaceAll` behavior used when ``replaceAll`` is absent.
-    private static let defaultReplaceAll = false
+    /// The `replacesAll` behavior used when ``replacesAll`` is absent.
+    private static let defaultReplacesAll = false
 
     // MARK: Status names
 
@@ -415,7 +415,7 @@ extension EditFile {
         let lineEnding = AtomicWriter.detectLineEnding(in: decoded.text)
 
         let pairs: [EditEngine.Pair]
-        switch EditEngine.normalize(Self.arguments(find: find, replace: replace, replaceAll: replaceAll, occurrence: occurrence)) {
+        switch EditEngine.normalize(Self.arguments(find: find, replace: replace, replacesAll: replacesAll, occurrence: occurrence)) {
         case .pairs(let shaped):
             pairs = shaped
         case .corrective(let message):
@@ -435,19 +435,19 @@ extension EditFile {
     /// - Parameters:
     ///   - find: the `find` values, or `nil`.
     ///   - replace: the `replace` values, or `nil`.
-    ///   - replaceAll: the `replaceAll` flag, or `nil`.
+    ///   - replacesAll: the `replacesAll` flag, or `nil`.
     ///   - occurrence: the `occurrence` selector, or `nil`.
     /// - Returns: the normalized arguments, with absent arrays treated as empty.
     private static func arguments(
         find: [String]?,
         replace: [String]?,
-        replaceAll: Bool?,
+        replacesAll: Bool?,
         occurrence: Int?
     ) -> EditEngine.EditArguments {
         EditEngine.EditArguments(
             finds: find ?? [],
             replaces: replace ?? [],
-            replaceAll: replaceAll ?? defaultReplaceAll,
+            replaceAll: replacesAll ?? defaultReplacesAll,
             occurrence: occurrence
         )
     }
