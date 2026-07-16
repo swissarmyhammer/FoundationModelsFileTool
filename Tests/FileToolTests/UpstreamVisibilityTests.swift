@@ -21,6 +21,7 @@ private struct ProbeEmbedder: TextEmbedding {
     /// Returns one zero vector of length ``dimension`` per input string.
     /// - Parameter texts: The strings to (nominally) embed.
     /// - Returns: One `dimension`-length zero vector per input, in order.
+    /// - Throws: Nothing; the signature carries `throws` to satisfy the `TextEmbedding` protocol requirement.
     func embed(_ texts: [String]) async throws -> [[Float]] {
         texts.map { _ in [Float](repeating: 0, count: dimension) }
     }

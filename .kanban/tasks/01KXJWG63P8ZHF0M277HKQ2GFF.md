@@ -45,6 +45,29 @@ comments:
   id: 01kxpaj5g7bmmtm9e23bcapcfm
   text: 'Iteration 1: implement landed green. Added Tests/FileToolTests/UpstreamVisibilityTests.swift — compile-visibility probe with PLAIN `import FoundationModelsCodeContext` (NOT @testable), no LSP spawn. private struct ProbeEmbedder: TextEmbedding (GPU-free 1-dim zero vector; production NullEmbedder lands in bridge task). Test 1 managerIsConstructibleWithPlainImport(): constructs CodeContextManager(embedder:) via public async init (stores pieces + awaits ManagerState(); server starts only on context(for:)/context(containing:), never called), reads public nonisolated state. Test 2 publicReadPathsAreReachableWithoutTestable(): references two compiled-but-uninvoked file-scope helpers (so members are visibility-checked without constructing a report/context) — readReportSurface reads report.records/counts.errors/pending + DiagnosticRecord.path; readRootDirectorySynchronously reads context.rootDirectory with NO await (only compiles if public AND nonisolated). TDD teeth-check: temporarily added DiagnosticsReport(records:[],pending:false) → plain-import build FAILED "''DiagnosticsReport'' initializer is inaccessible due to ''internal'' protection level" → proves the boundary is genuinely enforced; reverted before green. Delta also includes Package.resolved pin bump to 91e2b00 (a task acceptance criterion). Did NOT touch upstream repo / re-run swift package update. swift test --filter UpstreamVisibilityTests 2/2; full 190 unit + 1 integration green, double-check PASS. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T20:40:48.391439+00:00
+- actor: claude-code
+  id: 01kxpb1h76y93ye2xegnc4142j
+  text: 'Iteration 1 review: full pass 14/0. Intentional-design aspects (plain non-@testable import, throwaway ProbeEmbedder: TextEmbedding, compiled-but-uninvoked helpers) all correctly NOT flagged. 1 confirmed finding: UpstreamVisibilityTests.swift:24 — ProbeEmbedder''s method declares `throws` but its doc comment lacks the required `- Throws:` section (rule: -Throws: iff the function throws). New deliverable file so no test-refactor exception. Looping to /implement iteration 2 — add a real `- Throws:` line to that method''s DocC (honest wording, e.g. "- Throws: Never; the `throws` is carried to satisfy the TextEmbedding protocol requirement." if it never actually throws), and sweep the whole file for any other throwing symbol missing -Throws:.'
+  timestamp: 2026-07-16T20:49:11.910086+00:00
+- actor: claude-code
+  id: 01kxpb56fepdh6cbebrqvktkfc
+  text: |-
+    Iteration 2: worked the 1 review finding (UpstreamVisibilityTests.swift ProbeEmbedder.embed missing `- Throws:`). Docs-only fix.
+
+    Added exactly one line to ProbeEmbedder.embed's DocC, after `- Returns:`:
+      /// - Throws: Nothing; the signature carries `throws` to satisfy the `TextEmbedding` protocol requirement.
+    Honest wording — the body (`texts.map { ... }`) never throws; `throws` is only carried to satisfy the TextEmbedding protocol requirement. Matches the exact repo convention already used for the never-throwing `execute(in:)` in EditFile.swift / GlobFiles.swift / GrepFiles.swift.
+
+    Whole-file sweep for other `throws` symbols missing `- Throws:`: `embed` is the ONLY throwing function/initializer in the file. `readReportSurface` and `readRootDirectorySynchronously` are non-throwing; both `@Test` methods (`managerIsConstructibleWithPlainImport`, `publicReadPathsAreReachableWithoutTestable`) are non-throwing (one is `async`, not `throws`). No initializers declared here. Zero recurrences remain.
+
+    No behavior/signature change — comment-only. Did NOT re-run swift package update; Package.resolved still pinned at FoundationModelsCodeContext main 91e2b00 (verified, not in the diff). Git diff: only UpstreamVisibilityTests.swift (+1 line) + this card's kanban metadata.
+
+    Tests: `swift test --filter UpstreamVisibilityTests` → 2/2 green. Full `swift test` → 190 tests / 12 suites + 1 integration scaffold test, all green, exit 0. Finding flipped to [x]. Leaving task in doing for /review.
+  timestamp: 2026-07-16T20:51:11.982773+00:00
+- actor: claude-code
+  id: 01kxpb5rytb92bzbns68yjsvzn
+  text: 'Iteration 2: finding fixed, docs-only. Added to ProbeEmbedder.embed (after -Returns): `/// - Throws: Nothing; the signature carries throws to satisfy the TextEmbedding protocol requirement.` (honest — body never throws; mirrors the established never-throwing execute(in:) pattern in EditFile/GlobFiles/GrepFiles). Whole-file sweep: embed is the ONLY throwing symbol; helpers non-throwing, @Test methods non-throwing (one async not throws), no inits → zero recurrences. git diff shows only UpstreamVisibilityTests.swift (+1 comment) + kanban metadata; Package.resolved untouched (still 91e2b00). swift test --filter UpstreamVisibilityTests 2/2, full 190 unit + 1 integration green. Left in doing → /test → /commit → /review.'
+  timestamp: 2026-07-16T20:51:30.906628+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Upstream: expose CodeContext.rootDirectory publicly + bump pin to CodeContextManager revision'
@@ -67,3 +90,7 @@ Remaining work, in the upstream repo `/Users/wballard/github/swissarmyhammer/Fou
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-16 15:43)
+
+- [x] `Tests/FileToolTests/UpstreamVisibilityTests.swift:24` — Function signature declares `throws` but documentation lacks required `- Throws:` section—per rule, `- Throws:` must appear iff the function throws. Add `- Throws:` documentation section, e.g., `/// - Throws: Never throws (though protocol requires `throws` signature).`. RESOLVED: added `/// - Throws: Nothing; the signature carries \`throws\` to satisfy the \`TextEmbedding\` protocol requirement.` to `ProbeEmbedder.embed`, matching the repo convention (EditFile/GlobFiles/GrepFiles `execute`). Swept the whole file — `embed` is the only throwing symbol; the two `readReportSurface`/`readRootDirectorySynchronously` helpers and both `@Test` methods do not throw. Docs-only change; `swift test --filter UpstreamVisibilityTests` 2/2 green, full `swift test` green.
