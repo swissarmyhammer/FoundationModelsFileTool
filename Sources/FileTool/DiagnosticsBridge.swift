@@ -243,17 +243,26 @@ actor ManagerDiagnosticsResolver: DiagnosticsResolving {
         )
     }
 
+    /// The data-driven upstream-to-FileTool severity correspondence.
+    ///
+    /// Expresses the mapping as data rather than parallel switch arms a human
+    /// must keep in lockstep, covering all four fixed `DiagnosticSeverity`
+    /// cases. A severity absent from the table (which the fixed upstream enum
+    /// cannot currently produce) falls back to ``ResolvedSeverity/error`` — the
+    /// most conservative reading — in ``mappedSeverity(_:)``.
+    private static let severityMapping: [DiagnosticSeverity: ResolvedSeverity] = [
+        .error: .error,
+        .warning: .warning,
+        .information: .information,
+        .hint: .hint,
+    ]
+
     /// Maps an upstream `DiagnosticSeverity` to a ``ResolvedSeverity``.
     ///
     /// - Parameter severity: the upstream severity.
-    /// - Returns: the mirrored FileTool severity.
+    /// - Returns: the mirrored FileTool severity, defaulting to ``ResolvedSeverity/error``.
     private static func mappedSeverity(_ severity: DiagnosticSeverity) -> ResolvedSeverity {
-        switch severity {
-        case .error: .error
-        case .warning: .warning
-        case .information: .information
-        case .hint: .hint
-        }
+        severityMapping[severity] ?? .error
     }
 }
 
@@ -333,6 +342,12 @@ public final class DiagnosticsBridge: Sendable {
     /// The detail list is capped here while the error/warning counts remain
     /// true, so a mutation that breaks a great many sites still reports accurate
     /// totals alongside a bounded, useful detail list.
+    ///
+    /// Deliberately `internal` (not `private`, unlike the reporting-policy
+    /// constants above): `DiagnosticsBridgeTests` reads it via `@testable` to
+    /// generate an over-cap report and assert the capped item count against it
+    /// rather than hard-coding `100` in the test. Narrowing it to `private`
+    /// breaks that test.
     static let maximumReportedItemCount = 100
 
     /// The glob metacharacters, in the order the skip note lists them.
@@ -378,6 +393,16 @@ public final class DiagnosticsBridge: Sendable {
     )
 
     // MARK: Notes
+
+    // The model-facing note constants below (``nonDiagnosableNote``,
+    // ``globMetacharacterNote``, ``notInWorkspaceNote``, ``pendingReportNote``)
+    // are deliberately `internal`, not `private`: `DiagnosticsBridgeTests`
+    // asserts a skipped/pending result carries exactly one of them, reading the
+    // constant via `@testable` rather than duplicating the literal string in the
+    // test. Narrowing any of them to `private` breaks those assertions. The
+    // note *fragments* they are composed from (``noDiagnosticsPassNote``,
+    // ``degradedNotePrefix``, ``degradedNoteSuffix``) are never referenced by a
+    // test and so stay `private`.
 
     /// The shared suffix every skip note ends with: no diagnostics pass ran.
     ///
