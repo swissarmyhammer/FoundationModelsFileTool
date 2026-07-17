@@ -27,7 +27,9 @@ import Foundation
 /// discards every staged temporary and aborts with destinations untouched. Only
 /// once all stages succeed are they committed, then move sources and delete
 /// targets are unlinked — deletes last, and never a path that is also a write
-/// destination, so a swap or rotation keeps the content another hunk wrote.
+/// destination, so a swap or rotation keeps the content another hunk wrote. An
+/// unlink that fails after the commits is surfaced as a corrective rather than
+/// swallowed, so the reported outcome never claims a removal that did not happen.
 public enum PatchEngine {
     // MARK: Public result types
 
@@ -105,8 +107,9 @@ public enum PatchEngine {
     /// ``PathViolation`` and ``ParseFailure``): a rejection is a `Result` failure,
     /// never raised. ``corrective(_:)`` carries a message the model reads and acts
     /// on — a path violation, an add onto an existing file, a delete of a missing
-    /// file, a binary update target, a cross-file conflict, or a stage/commit
-    /// failure. ``unresolved(path:pair:resolution:)`` carries the failing file's
+    /// file, a binary update target, a cross-file conflict, a stage/commit
+    /// failure, or a post-commit unlink failure that leaves a file on disk.
+    /// ``unresolved(path:pair:resolution:)`` carries the failing file's
     /// path, the failing ``EditEngine/Pair``, and its non-definite
     /// ``EditEngine/Resolution`` so the operation can surface the same candidates
     /// and near-misses `edit file` does. The type conforms to `Error` only so it
@@ -494,7 +497,9 @@ public enum PatchEngine {
         if let failure = commit(staged) {
             return .failure(failure)
         }
-        performRemovals(changes)
+        if let failure = performRemovals(changes) {
+            return .failure(failure)
+        }
         return .success(changes.map(outcome))
     }
 
@@ -526,16 +531,30 @@ public enum PatchEngine {
     /// is skipped, so a swap (`a→b`, `b→a`) or rotation keeps the content a peer
     /// hunk wrote onto that path.
     ///
+    /// An unlink that fails aborts with a corrective rather than being swallowed:
+    /// removals run *after* every write has committed, so a failed unlink cannot
+    /// be rolled back, but reporting `.success` here would emit a ``FileOutcome``
+    /// claiming a `.deleted`/`.moved` file that in fact still exists on disk. The
+    /// corrective keeps the reported outcome truthful — a removal failure is
+    /// surfaced the same way ``commit(_:)`` surfaces a post-commit failure —
+    /// while the committed writes (which cannot be undone) stay in place.
+    ///
     /// - Parameter changes: the committed changes whose removals to perform.
-    private static func performRemovals(_ changes: [Change]) {
+    /// - Returns: a ``Failure`` when an unlink fails, or `nil` when all succeed.
+    private static func performRemovals(_ changes: [Change]) -> Failure? {
         let writeDestinations = Set(changes.compactMap { $0.write?.url.path })
         for kind in removalOrder {
             for change in changes {
                 guard let removal = change.removal, removal.kind == kind else { continue }
                 guard !writeDestinations.contains(removal.url.path) else { continue }
-                try? FileManager.default.removeItem(at: removal.url)
+                do {
+                    try FileManager.default.removeItem(at: removal.url)
+                } catch {
+                    return .corrective(Messages.removalFailure(path: removal.url.path))
+                }
             }
         }
+        return nil
     }
 
     /// The order removals run in: move sources first, delete targets last.
@@ -641,6 +660,18 @@ public enum PatchEngine {
         /// - Returns: the corrective message.
         static func commitFailure(path: String) -> String {
             "The patch resolved but a file could not be committed: \(path)"
+        }
+
+        /// The corrective for a move source or delete target that could not be unlinked.
+        ///
+        /// Removals run after every write commits, so this reports a file that
+        /// could not be removed even though the patch's writes landed — the file
+        /// remains on disk, and the outcome does not claim it was deleted or moved.
+        ///
+        /// - Parameter path: the path that could not be unlinked.
+        /// - Returns: the corrective message.
+        static func removalFailure(path: String) -> String {
+            "The patch's writes committed but a file could not be removed, so it remains on disk: \(path)"
         }
     }
 }

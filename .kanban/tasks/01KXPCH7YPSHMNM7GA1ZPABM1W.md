@@ -35,6 +35,26 @@ comments:
 
     Task is GREEN and left in doing for /review. Package.resolved untouched.
   timestamp: 2026-07-17T08:58:29.707944+00:00
+- actor: claude-code
+  id: 01kxqnh0gnxx8y1qr0ethsdfp8
+  text: |-
+    Worked the 2026-07-17 03:59 review finding (swallowed unlink errors in the removal phase). Chose remedy (a) propagate-and-abort — the only one sound under the two-phase contract.
+
+    Reasoning: removals run AFTER the atomic commit phase, so a failed unlink cannot be rolled back. Remedies (b) partial-success flag and (c) document/log both still emit a FileOutcome list containing a `.deleted`/`.moved` for a file that in fact remains on disk — exactly the falsehood the finding forbids. Remedy (a) returns `.failure`, so NO outcome list is produced and nothing can claim a removal that did not happen. It is also consistent with the engine's existing `commit(_:)`, which already returns `.corrective` on a post-partial-commit failure.
+
+    Changes (Sources/FileTool/PatchEngine.swift):
+    - `performRemovals(_:)` now returns `Failure?`; on a `removeItem` throw it returns `.corrective(Messages.removalFailure(path:))` instead of `try?`-swallowing.
+    - `writeChanges(_:)` propagates that: `if let failure = performRemovals(changes) { return .failure(failure) }`.
+    - Added `Messages.removalFailure(path:)` ("The patch's writes committed but a file could not be removed, so it remains on disk: …").
+    - Updated docstrings: class-level phase-2 note, `Failure.corrective` cause list, `performRemovals`.
+
+    Tests (TDD, RED first — both failed as `.success` before, green after):
+    - `deleteWhoseUnlinkFailsAbortsRatherThanReportingAFalseDeletion`
+    - `moveWhoseSourceUnlinkFailsAbortsRatherThanReportingAFalseMove`
+    Both use a `setImmutable` helper (chflags UF_IMMUTABLE) — leaves parent-dir writability and mode bits untouched so phase-1 `.delete`/`.edit` validation passes, but denies the phase-2 unlink. Each asserts `.failure(.corrective)` and that the file remains on disk (move test also confirms the destination was committed).
+
+    Verification: `swift test --filter PatchEngineTests` → 15/15 green; full `swift test` → FileToolTests 332/21 and integration 26/7, all green. Package.resolved untouched. Running adversarial double-check.
+  timestamp: 2026-07-17T09:11:39.285566+00:00
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
@@ -76,3 +96,7 @@ Keep the engine free of `@Operation`/wire types — it returns engine-level valu
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-17 03:59)
+
+- [x] `Sources/FileTool/PatchEngine.swift:446` — Removal (unlink) errors are silently swallowed via `try?`, but FileOutcome still reports `.deleted` even if the file remains due to an unlink failure. This creates a contract mismatch where the outcome doesn't accurately reflect whether the operation fully succeeded. The operation layer cannot detect that a delete-action file still exists on disk. Either (1) propagate removal errors and abort the operation, or (2) add a flag to FileOutcome to indicate partial success (some removals failed), or (3) add a test case that simulates unlink failure (e.g., permission denied) and documents that `.deleted` outcome does not guarantee removal actually occurred, and add an explicit log or warning when removal fails so the operation layer can be aware.

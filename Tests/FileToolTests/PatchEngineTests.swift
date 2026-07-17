@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 
@@ -59,6 +60,23 @@ import Testing
     private static func temporaryLeftovers(in directory: URL) -> [String] {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return names.filter { $0.contains(".tmp.") }
+    }
+
+    /// Set or clear the user-immutable (`UF_IMMUTABLE`) flag on a file.
+    ///
+    /// Locking a file immutable makes a later `removeItem` fail with `EPERM`
+    /// while leaving its mode bits — and its parent directory's writability —
+    /// untouched, so the ``PathGuard`` `.delete`/`.edit` checks still pass in
+    /// phase 1. That is how a phase-2 *unlink* failure is provoked without a
+    /// phase-1 rejection. The owner may toggle the user flag without root.
+    ///
+    /// - Parameters:
+    ///   - path: the file to lock or unlock.
+    ///   - immutable: `true` to lock, `false` to unlock.
+    /// - Returns: `true` when the flag change succeeded.
+    @discardableResult
+    private static func setImmutable(_ path: String, _ immutable: Bool) -> Bool {
+        chflags(path, immutable ? UInt32(UF_IMMUTABLE) : 0) == 0
     }
 
     /// The outcome whose reported path ends with `suffix`.
@@ -248,6 +266,53 @@ import Testing
         #expect(!Self.exists(lockedDirectory.appendingPathComponent("c.txt").path))
         #expect(Self.temporaryLeftovers(in: root).isEmpty)
         #expect(Self.temporaryLeftovers(in: lockedDirectory).isEmpty)
+    }
+
+    // MARK: Phase-2 removal failure
+
+    @Test func deleteWhoseUnlinkFailsAbortsRatherThanReportingAFalseDeletion() throws {
+        let (root, pathGuard) = Self.makeFixture()
+        let stillHere = Data("still here\n".utf8)
+        let doomed = try Self.seed(stillHere, named: "immutable.txt", in: root)
+
+        // Lock the file so `.delete` validation passes in phase 1 (the parent
+        // stays writable) but the phase-2 unlink is denied.
+        #expect(Self.setImmutable(doomed, true))
+        defer { Self.setImmutable(doomed, false) }
+
+        let hunks: [PatchParser.Hunk] = [.deleteFile(path: doomed)]
+        guard case .failure(.corrective) = PatchEngine.apply(hunks, using: pathGuard) else {
+            Issue.record("expected .corrective when a delete target cannot be unlinked")
+            return
+        }
+        // The unlink failure was surfaced, not swallowed behind a `.deleted`
+        // outcome: the file is still on disk and no false success was reported.
+        #expect(Self.bytes(doomed) == stillHere)
+    }
+
+    @Test func moveWhoseSourceUnlinkFailsAbortsRatherThanReportingAFalseMove() throws {
+        let (root, pathGuard) = Self.makeFixture()
+        let payload = Data("payload\n".utf8)
+        let source = try Self.seed(payload, named: "locked-source.txt", in: root)
+        let destination = Self.path("moved-dest.txt", in: root)
+
+        // Lock the source so `.edit` validation and the decode both pass, but
+        // the post-commit unlink of the move source is denied.
+        #expect(Self.setImmutable(source, true))
+        defer { Self.setImmutable(source, false) }
+
+        let hunks: [PatchParser.Hunk] = [
+            .updateFile(path: source, movePath: destination, pairs: [])
+        ]
+        guard case .failure(.corrective) = PatchEngine.apply(hunks, using: pathGuard) else {
+            Issue.record("expected .corrective when a move source cannot be unlinked")
+            return
+        }
+        // Removals run after commits, so the destination was written — but the
+        // source still exists, so the engine must not have claimed a completed
+        // move; it reports the failure instead.
+        #expect(Self.bytes(source) == payload)
+        #expect(Self.bytes(destination) == payload)
     }
 
     // MARK: Pure rename
