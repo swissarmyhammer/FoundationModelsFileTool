@@ -34,20 +34,70 @@ public enum AtomicWriter {
 
     // MARK: Write path
 
-    /// Write `data` to `url` atomically, creating parents and preserving permissions.
+    /// A write prepared on disk but not yet committed onto its destination.
     ///
-    /// Creates the target's parent directories if they do not exist, writes the
-    /// bytes to a sibling temporary file, re-applies the original file's
-    /// permission bits when overwriting, and renames the temporary file onto the
-    /// target. On any failure the temporary file is removed and the error is
-    /// rethrown, leaving the target untouched.
+    /// ``AtomicWriter/stage(_:to:)`` returns one of these after writing the new
+    /// bytes to a sibling temporary file (permission bits already applied) but
+    /// *before* renaming it onto the destination. This splits the single-shot
+    /// ``AtomicWriter/write(_:to:)`` into two phases so a multi-file patch can
+    /// stage every file first and only then ``commit()`` them, shrinking the
+    /// partial-write window to the sequence of renames. On any staging failure
+    /// or an abandoned patch, ``discard()`` removes the temporary file, leaving
+    /// the destination untouched.
+    public struct StagedWrite {
+        /// The sibling temporary file holding the staged bytes.
+        let temporaryURL: URL
+
+        /// The destination the staged bytes commit onto.
+        let destinationURL: URL
+
+        /// The destination's permission bits when it already existed, else `nil`.
+        ///
+        /// Captured at stage time and already applied to ``temporaryURL`` so the
+        /// commit is a pure rename; retained for inspection and so the staging
+        /// contract is visible on the value.
+        let permissionBits: mode_t?
+
+        /// Rename the staged temporary file onto its destination, atomically.
+        ///
+        /// The commit phase of a staged write: a single POSIX `rename` that
+        /// atomically replaces any existing destination on one filesystem. The
+        /// caller removes the temporary file via ``discard()`` if a commit in a
+        /// multi-file sequence fails.
+        ///
+        /// - Throws: an ``AtomicWriteError`` when the rename fails.
+        public func commit() throws {
+            try AtomicWriter.rename(temporaryURL, onto: destinationURL)
+        }
+
+        /// Remove the staged temporary file, leaving the destination untouched.
+        ///
+        /// Idempotent and non-throwing: a `discard()` after a successful
+        /// ``commit()`` (the temporary file is gone, renamed onto the
+        /// destination) or a second `discard()` is a no-op, so it is safe to
+        /// call on every staged write when rolling back an abandoned patch.
+        public func discard() {
+            try? FileManager.default.removeItem(at: temporaryURL)
+        }
+    }
+
+    /// Stage `data` for `url`: write it to a sibling temp without committing.
+    ///
+    /// The preparation phase of an atomic write. Creates the target's parent
+    /// directories if they do not exist, writes the bytes to a sibling temporary
+    /// file in the destination's own directory, and re-applies the destination's
+    /// existing permission bits when overwriting — but does *not* rename onto the
+    /// destination, so the destination is untouched until
+    /// ``StagedWrite/commit()``. On any failure the temporary file is removed and
+    /// the error is rethrown, leaving nothing behind.
     ///
     /// - Parameters:
-    ///   - data: the bytes to write.
+    ///   - data: the bytes to stage.
     ///   - url: the destination file URL.
-    /// - Throws: an ``AtomicWriteError`` when the rename fails, or the
-    ///   underlying error when creating a directory or writing the bytes fails.
-    public static func write(_ data: Data, to url: URL) throws {
+    /// - Returns: a ``StagedWrite`` ready to commit or discard.
+    /// - Throws: the underlying error when creating a directory or writing the
+    ///   bytes fails, or an ``AtomicWriteError`` when re-applying permissions fails.
+    public static func stage(_ data: Data, to url: URL) throws -> StagedWrite {
         let originalPermissions = existingPermissionBits(of: url)
         try createParentDirectory(of: url)
         let temporaryURL = makeTemporaryURL(for: url)
@@ -56,9 +106,35 @@ public enum AtomicWriter {
             if let originalPermissions {
                 try applyPermissionBits(originalPermissions, to: temporaryURL)
             }
-            try rename(temporaryURL, onto: url)
         } catch {
             try? FileManager.default.removeItem(at: temporaryURL)
+            throw error
+        }
+        return StagedWrite(temporaryURL: temporaryURL, destinationURL: url, permissionBits: originalPermissions)
+    }
+
+    /// Write `data` to `url` atomically, creating parents and preserving permissions.
+    ///
+    /// A single-shot ``stage(_:to:)`` immediately followed by
+    /// ``StagedWrite/commit()``, so one temp+rename implementation serves both
+    /// the single-file write and the multi-file staged commit. Creates the
+    /// target's parent directories if they do not exist, writes the bytes to a
+    /// sibling temporary file, re-applies the original file's permission bits
+    /// when overwriting, and renames the temporary file onto the target. On any
+    /// failure the temporary file is removed and the error is rethrown, leaving
+    /// the target untouched.
+    ///
+    /// - Parameters:
+    ///   - data: the bytes to write.
+    ///   - url: the destination file URL.
+    /// - Throws: an ``AtomicWriteError`` when the rename fails, or the
+    ///   underlying error when creating a directory or writing the bytes fails.
+    public static func write(_ data: Data, to url: URL) throws {
+        let staged = try stage(data, to: url)
+        do {
+            try staged.commit()
+        } catch {
+            staged.discard()
             throw error
         }
     }

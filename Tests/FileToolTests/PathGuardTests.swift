@@ -342,6 +342,57 @@ import Testing
         }
     }
 
+    // MARK: Delete permission checks
+
+    @Test func acceptsDeleteOfExistingRegularFileInWritableDirectory() throws {
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let file = directory.appendingPathComponent("victim.txt")
+        try "content".write(to: file, atomically: true, encoding: .utf8)
+
+        let guardUnderTest = PathGuard(root: directory)
+        let resolved = try guardUnderTest.validate(file.path, for: .delete).get()
+        #expect(resolved.lastPathComponent == "victim.txt")
+    }
+
+    @Test func rejectsDeleteOfNonexistentFile() {
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let guardUnderTest = PathGuard(root: directory)
+        let target = directory.appendingPathComponent("nope.txt")
+        let result = guardUnderTest.checkPermission(target, for: .delete)
+        #expect(throws: PathViolation.self) { try result.get() }
+        if case .failure(let violation) = result {
+            #expect(violation.message.lowercased().contains("non-existent"))
+        }
+    }
+
+    @Test func rejectsDeleteOfDirectory() {
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let guardUnderTest = PathGuard(root: directory)
+        let result = guardUnderTest.checkPermission(directory, for: .delete)
+        #expect(throws: PathViolation.self) { try result.get() }
+        if case .failure(let violation) = result {
+            #expect(violation.message.lowercased().contains("regular file"))
+        }
+    }
+
+    @Test func rejectsDeleteWhenParentDirectoryIsNotWritable() throws {
+        let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")
+        let file = directory.appendingPathComponent("locked.txt")
+        try "content".write(to: file, atomically: true, encoding: .utf8)
+        // POSIX deletion permission lives on the parent directory, so removing
+        // its write bits must reject the delete even though the file itself is
+        // writable. Restore the write bits in teardown so the OS can reclaim it.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+
+        let guardUnderTest = PathGuard(root: directory)
+        let result = guardUnderTest.checkPermission(file, for: .delete)
+        #expect(throws: PathViolation.self) { try result.get() }
+        if case .failure(let violation) = result {
+            #expect(violation.message.lowercased().contains("parent directory is not writable"))
+        }
+    }
+
     @Test(arguments: [FileOperation.read, .write, .edit])
     func acceptsWritableRegularFileForEveryOperation(operation: FileOperation) throws {
         let directory = TestSupport.makeTemporaryDirectory(named: "PathGuardTests")

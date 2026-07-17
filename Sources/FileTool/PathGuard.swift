@@ -36,6 +36,8 @@ public enum FileOperation: Sendable {
     case edit
     /// Creating or traversing a directory.
     case directory
+    /// Deleting an existing file.
+    case delete
 }
 
 /// Validates and permission-checks filesystem paths for the file operations.
@@ -362,6 +364,8 @@ public struct PathGuard: Sendable {
     ///   parent directory must exist.
     /// - `edit`: the file must exist and must not be read-only.
     /// - `directory`: an existing path must be a directory.
+    /// - `delete`: the path must be an existing regular file whose parent
+    ///   directory is writable (POSIX deletion permission lives on the parent).
     ///
     /// - Parameters:
     ///   - url: the resolved absolute URL (from ``validatePath(_:)``).
@@ -379,6 +383,8 @@ public struct PathGuard: Sendable {
             return checkEditPermission(path)
         case .directory:
             return checkDirectoryPermission(path)
+        case .delete:
+            return checkDeletePermission(path)
         }
     }
 
@@ -448,6 +454,32 @@ public struct PathGuard: Sendable {
     private func checkDirectoryPermission(_ path: String) -> Result<Void, PathViolation> {
         if fileExists(path), (Self.fileMode(path).map { ($0 & S_IFMT) != S_IFDIR }) ?? true {
             return .failure(PathViolation("Path exists but is not a directory: \(path)"))
+        }
+        return .success(())
+    }
+
+    /// Check that a path may be deleted: an existing regular file in a writable parent.
+    ///
+    /// A deletion needs no new access kind for a move/rename — the caller
+    /// validates the source with `delete` and the destination with `write`. The
+    /// path must exist and be a regular file, and its parent directory must be
+    /// writable, because POSIX places the permission to unlink a directory entry
+    /// on the containing directory (`0o222`), not on the file itself.
+    ///
+    /// - Parameter path: the resolved path to check.
+    /// - Returns: `.success` when deletable, or `.failure` with a corrective
+    ///   ``PathViolation``.
+    private func checkDeletePermission(_ path: String) -> Result<Void, PathViolation> {
+        guard fileExists(path) else {
+            return .failure(PathViolation("Cannot delete non-existent file: \(path)"))
+        }
+        guard let mode = Self.fileMode(path), (mode & S_IFMT) == S_IFREG else {
+            return .failure(PathViolation("Cannot delete non-regular file: \(path)"))
+        }
+        guard let parent = Self.parentPath(path),
+            let parentMode = Self.fileMode(parent), (parentMode & 0o222) != 0
+        else {
+            return .failure(PathViolation("Parent directory is not writable: \(Self.parentPath(path) ?? path)"))
         }
         return .success(())
     }

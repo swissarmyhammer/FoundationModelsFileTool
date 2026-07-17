@@ -1,8 +1,13 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '9580'
+comments:
+- actor: claude-code
+  id: 01kxqjd4wf88twekvyb7bebjhs
+  text: 'Implemented TDD. PathGuard: added FileOperation.delete + checkDeletePermission (existing regular file, parent dir writable via parent mode & 0o222; messages "Cannot delete non-existent file:", "Cannot delete non-regular file:", "Parent directory is not writable:"), wired into checkPermission switch. AtomicWriter: added StagedWrite struct (temporaryURL/destinationURL/permissionBits) with commit() (rename) and idempotent non-throwing discard() (unlink); added static stage(_:to:) that writes sibling temp + applies dest permission bits without renaming, cleaning up temp on failure; refactored write(_:to:) to stage + commit (discard-on-commit-failure) so there is one temp+rename impl. Behavior-preserving. Tests added to PathGuardTests (delete happy/nonexistent/directory/read-only-parent) and AtomicWriterTests (stage/commit/discard lifecycle, two-file independent commit, discard-after-commit no-op, permission preservation, temp cleanup on failed stage). Filtered: 48 tests green across both suites. Full `swift test` exits 0. Did not touch Package.resolved. Task stays in doing pending review.'
+  timestamp: 2026-07-17T08:17:06.959945+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'Patch substrate: PathGuard `.delete` access kind + AtomicWriter staged multi-file commit'
 ---
 ## What

@@ -29,8 +29,8 @@ comments:
 
     No code change; behavior matches spec exactly, suite green (306 unit + 26 integration).
   timestamp: 2026-07-17T08:04:59.800533+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9580'
 title: 'PatchParser: parse the `patch files` envelope (Add/Delete/Update/Move with Find/Replace bodies)'
 ---
 ## What
