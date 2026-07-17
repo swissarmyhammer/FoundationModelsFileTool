@@ -34,8 +34,10 @@ enum MultiProjectWorkspace {
     ///
     /// Deliberately *not* under the outer package's `Sources/` tree, so the outer
     /// package's build graph never claims it and the nested repository stands on
-    /// its own as an independent, git-initialized sub-package.
-    static let nestedSwiftRelativePath = "Sources/NestedRepo/Nested.swift"
+    /// its own as an independent, git-initialized sub-package. Built from
+    /// ``nestedRepositoryDirectoryName`` (also the nested manifest's target name)
+    /// so the directory name is single-sourced rather than restated here.
+    static var nestedSwiftRelativePath: String { "Sources/\(nestedRepositoryDirectoryName)/Nested.swift" }
 
     // MARK: - Stray-file seeds
 
@@ -110,19 +112,32 @@ enum MultiProjectWorkspace {
         defer { IsolatedWorkspace.remove(created) }
 
         let sessionRoot = IsolatedWorkspace.canonicalURL(created)
-        let packageARoot = sessionRoot.appendingPathComponent(packageADirectoryName, isDirectory: true)
-        let packageBRoot = sessionRoot.appendingPathComponent(packageBDirectoryName, isDirectory: true)
-        try FileManager.default.createDirectory(at: packageARoot, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: packageBRoot, withIntermediateDirectories: true)
-
-        let packageA = try IsolatedWorkspace.scaffoldSwiftPackage(at: packageARoot)
-        let packageB = try IsolatedWorkspace.scaffoldSwiftPackage(at: packageBRoot)
+        let packageA = try scaffoldPackageDirectory(named: packageADirectoryName, under: sessionRoot)
+        let packageB = try scaffoldPackageDirectory(named: packageBDirectoryName, under: sessionRoot)
 
         try IsolatedWorkspace.write(looseSwiftSeed, to: sessionRoot.appendingPathComponent(looseSwiftName))
         try IsolatedWorkspace.write(notesMarkdownSeed, to: sessionRoot.appendingPathComponent(notesMarkdownName))
 
         let root = MultiProjectRoot(sessionRoot: sessionRoot, packageA: packageA, packageB: packageB)
         return try await body(root)
+    }
+
+    /// Scaffolds one independent package into a fresh child directory of the session root.
+    ///
+    /// Both packages under a session root are built identically — a `name`-named
+    /// child directory scaffolded by ``IsolatedWorkspace/scaffoldSwiftPackage(at:)``
+    /// — so this is the single code path they share rather than two near-identical
+    /// blocks differing only by directory name.
+    ///
+    /// - Parameters:
+    ///   - name: the child directory name for the package under the session root.
+    ///   - sessionRoot: the session root to create the package directory under.
+    /// - Returns: the scaffolded package's paths.
+    /// - Throws: a file-write or `git` error if scaffolding fails.
+    private static func scaffoldPackageDirectory(named name: String, under sessionRoot: URL) throws -> ScaffoldedSwiftPackage {
+        let root = sessionRoot.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return try IsolatedWorkspace.scaffoldSwiftPackage(at: root)
     }
 
     // MARK: - Nested repository

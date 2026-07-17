@@ -562,11 +562,17 @@ struct MultiProjectTests {
     /// The session root is canonicalized up front and the manager records roots by
     /// their resolved on-disk path, so normalizing both sides this way compares
     /// them as sets without depending on URL trailing-slash or symlink form.
+    /// Delegates to ``IsolatedWorkspace/canonicalURL(_:)`` — the same `realpath`
+    /// primitive that canonicalizes the session root and that ``PathGuard`` uses
+    /// for operated-on paths — so both sides of the comparison resolve the leading
+    /// `/var` → `/private/var` symlink identically. `resolvingSymlinksInPath()`
+    /// does *not* resolve that prefix, which would leave these paths inconsistent
+    /// with the manager's recorded roots.
     ///
     /// - Parameter url: the URL to normalize.
     /// - Returns: the normalized path string.
     private func normalizedPath(_ url: URL) -> String {
-        url.resolvingSymlinksInPath().standardizedFileURL.path
+        IsolatedWorkspace.canonicalURL(url).path
     }
 
     /// The set of ``normalizedPath(_:)`` strings of a URL list.
