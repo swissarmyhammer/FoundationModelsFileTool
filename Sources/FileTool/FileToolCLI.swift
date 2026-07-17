@@ -125,6 +125,13 @@ public enum FileToolCLI {
     ///   failures through the typed ``correctiveKey`` output instead. A future op
     ///   that reaches the string channel (e.g. a macro-less fallback leaf) would
     ///   need this mapping extended.
+    ///
+    /// Deliberately `internal` (not `private`, and not part of this public
+    /// enum's API surface): `CLIDriverTests` drives this pure mapping directly
+    /// via `@testable` to assert the corrective/parse/success matrix without
+    /// spinning up a driver. Narrowing it to `private` breaks those tests —
+    /// the same intentional-internal-for-testability convention as
+    /// ``DiagnosticsBridge/maximumReportedItemCount``.
     static func resolveOutcome(output: String, exitCode: Int32) -> Outcome {
         guard exitCode == 0 else {
             return Outcome(output: output, isError: true, exitCode: exitCode)

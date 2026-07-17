@@ -56,8 +56,7 @@ func runScriptMode(context: FileContext) async {
             print(output)
         }
     } catch {
-        writeStandardError("\(FileToolCLI.executableName): \(error)")
-        exit(fatalExitCode)
+        exitWithFatalError(error)
     }
 }
 
@@ -83,8 +82,7 @@ func runCLIMode(arguments: [String], context: FileContext) async {
             exit(outcome.exitCode)
         }
     } catch {
-        writeStandardError("\(FileToolCLI.executableName): \(error)")
-        exit(fatalExitCode)
+        exitWithFatalError(error)
     }
 }
 
@@ -101,4 +99,16 @@ func readStandardInput() -> String {
 /// - Parameter message: the text to write.
 func writeStandardError(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
+}
+
+/// Reports `error` on standard error, prefixed with the executable name, and
+/// exits with ``fatalExitCode``.
+///
+/// Shared by the mode dispatchers so a fatal failure a mode could not turn into
+/// a resolved outcome reports and exits identically wherever it is raised.
+///
+/// - Parameter error: the fatal error to report.
+func exitWithFatalError(_ error: Error) -> Never {
+    writeStandardError("\(FileToolCLI.executableName): \(error)")
+    exit(fatalExitCode)
 }

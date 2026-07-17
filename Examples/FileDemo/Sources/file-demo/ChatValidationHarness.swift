@@ -276,7 +276,7 @@ private struct Workspace {
     ///
     /// - Returns: the scaffolded workspace handle.
     /// - Throws: a file-write or `git` error if scaffolding fails.
-    static func scaffold() throws -> Workspace {
+    fileprivate static func scaffold() throws -> Workspace {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileDemoChat-\(UUID().uuidString)", isDirectory: true)
         let demoRelativePath = demoPathComponents.joined(separator: "/")
