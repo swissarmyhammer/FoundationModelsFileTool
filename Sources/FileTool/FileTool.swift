@@ -1,14 +1,15 @@
 import FoundationModels
 import Operations
 
-/// The fused `files` tool: the five file operations presented to a model and a
+/// The fused `files` tool: the six file operations presented to a model and a
 /// CLI as one `OperationTool`, plus a read-only variant.
 ///
 /// ``make(context:)`` fuses ``ReadFile``, ``WriteFile``, ``EditFile``,
-/// ``GlobFiles``, and ``GrepFiles`` into a single ``OperationTool`` named
-/// `files`; ``makeReadOnly(context:)`` fuses the read/glob/grep trio for real
-/// and stubs `write file` / `edit file` so they return a corrective, porting the
-/// Rust `FileOperationSubset::ReadOnly` surface.
+/// ``GlobFiles``, ``GrepFiles``, and ``PatchFiles`` into a single
+/// ``OperationTool`` named `files`; ``makeReadOnly(context:)`` fuses the
+/// read/glob/grep trio for real and stubs `write file` / `edit file` /
+/// `patch files` so they return a corrective, porting the Rust
+/// `FileOperationSubset::ReadOnly` surface.
 ///
 /// The fusion, the flat-union schema, the forgiving op/parameter resolution, and
 /// the return-don't-throw retry cap are all inherited from the upstream
@@ -35,12 +36,13 @@ public enum FileTool {
 
     // MARK: Public factories
 
-    /// Builds the read/write `files` tool fusing all five file operations.
+    /// Builds the read/write `files` tool fusing all six file operations.
     ///
     /// The operations dispatch through ``AnyOperation`` against the shared
-    /// `context`, in the order `read` / `write` / `edit` / `glob` / `grep` (the
-    /// order the fused schema's `op` enum and any unknown-operation corrective
-    /// list them in). The resolver carries the missing-`op` inference hook.
+    /// `context`, in the order `read` / `write` / `edit` / `glob` / `grep` /
+    /// `patch` (the order the fused schema's `op` enum and any
+    /// unknown-operation corrective list them in). The resolver carries the
+    /// missing-`op` inference hook.
     ///
     /// - Parameter context: the shared session context every operation's
     ///   `execute(in:)` runs against.
@@ -60,6 +62,7 @@ public enum FileTool {
                 AnyOperation(EditFile.self),
                 AnyOperation(GlobFiles.self),
                 AnyOperation(GrepFiles.self),
+                AnyOperation(PatchFiles.self),
             ]
         )
     }
@@ -91,6 +94,7 @@ public enum FileTool {
                 AnyOperation(ReadOnlyEditFile.self),
                 AnyOperation(GlobFiles.self),
                 AnyOperation(GrepFiles.self),
+                AnyOperation(ReadOnlyPatchFiles.self),
             ]
         )
     }
@@ -147,8 +151,10 @@ public enum FileTool {
     /// any future default addition that would collide. Derived from the
     /// operations' own `verb` statics so it cannot drift from them.
     private static let fileVerbSelfAliases: [String: String] = Dictionary(
-        uniqueKeysWithValues: [ReadFile.verb, WriteFile.verb, EditFile.verb, GlobFiles.verb, GrepFiles.verb]
-            .map { ($0, $0) }
+        uniqueKeysWithValues: [
+            ReadFile.verb, WriteFile.verb, EditFile.verb, GlobFiles.verb, GrepFiles.verb, PatchFiles.verb,
+        ]
+        .map { ($0, $0) }
     )
 
     // MARK: Read-only rejection
@@ -156,12 +162,13 @@ public enum FileTool {
     /// The corrective returned when a mutating op is invoked on the read-only tool.
     ///
     /// - Parameter operation: the op string of the rejected mutation
-    ///   (`write file` or `edit file`).
+    ///   (`write file`, `edit file`, or `patch files`).
     /// - Returns: the corrective message naming the operation.
     ///
     /// - Note: `fileprivate`, not `private`: the only callers are the
-    ///   ``ReadOnlyWriteFile`` / ``ReadOnlyEditFile`` stub `execute(in:)` bodies,
-    ///   which are separate top-level types in this file, so a `private` member
+    ///   ``ReadOnlyWriteFile`` / ``ReadOnlyEditFile`` / ``ReadOnlyPatchFiles``
+    ///   stub `execute(in:)` bodies, which are separate top-level types in this
+    ///   file, so a `private` member
     ///   of `FileTool` would be out of their scope. `fileprivate` is the tightest
     ///   access level that stays reachable by those callers.
     fileprivate static func readOnlyRejectionMessage(forOperation operation: String) -> String {
@@ -233,9 +240,15 @@ public enum FileTool {
     private static let pathMarkerKeys: Set<String> =
         markerKeys(of: ReadFile.parameterMetadata, forParametersNamed: ["path"])
 
+    /// Normalized keys that mark a patch: ``PatchFiles``'s `patch` name and aliases.
+    private static let patchMarkerKeys: Set<String> =
+        markerKeys(of: PatchFiles.parameterMetadata, forParametersNamed: ["patch"])
+
     /// The ordered inference precedence, first match winning: edit-ish keys →
     /// `edit file`; `content` → `write file`; `pattern` plus a grep marker →
-    /// `grep files`; `pattern` alone → `glob files`; `path` alone → `read file`.
+    /// `grep files`; `pattern` alone → `glob files`; `path` alone → `read file`;
+    /// `patch` → `patch files` (a key no other op carries, so its position is
+    /// immaterial).
     private static let inferenceRules: [InferenceRule] = [
         InferenceRule(operationString: EditFile.opString, triggerKeys: editMarkerKeys, alsoRequiringAnyOf: nil),
         InferenceRule(operationString: WriteFile.opString, triggerKeys: writeMarkerKeys, alsoRequiringAnyOf: nil),
@@ -246,6 +259,7 @@ public enum FileTool {
         ),
         InferenceRule(operationString: GlobFiles.opString, triggerKeys: patternMarkerKeys, alsoRequiringAnyOf: nil),
         InferenceRule(operationString: ReadFile.opString, triggerKeys: pathMarkerKeys, alsoRequiringAnyOf: nil),
+        InferenceRule(operationString: PatchFiles.opString, triggerKeys: patchMarkerKeys, alsoRequiringAnyOf: nil),
     ]
 
     /// Proposes an op string for an `op`-less payload from the keys it carries.
@@ -303,22 +317,24 @@ public enum FileTool {
 
 // MARK: - Read-only mutation stubs
 
-// `ReadOnlyWriteFile` and `ReadOnlyEditFile` are deliberately two distinct
-// concrete types rather than one parameterized (or generic) struct. Fusion
-// dispatches to concrete operations by their `@Operation` verb/noun pair and
-// returns each operation's own typed `Output`: the read-only `write file` must
-// return `WriteOutput` and `edit file` must return `EditOutput`. The
-// `@Generable` / `@Operation` macros synthesize that per-type machinery from a
-// concrete declaration — and `WriteOutput` / `EditOutput` share no common
-// `corrective(_:)` factory to generalize over (`WriteOutput` is not even
-// `CorrectiveEncodable`; that protocol governs only *encoding*, not
-// construction) — so no single struct can stand in for both output types.
+// `ReadOnlyWriteFile`, `ReadOnlyEditFile`, and `ReadOnlyPatchFiles` are
+// deliberately three distinct concrete types rather than one parameterized (or
+// generic) struct. Fusion dispatches to concrete operations by their
+// `@Operation` verb/noun pair and returns each operation's own typed `Output`:
+// the read-only `write file` must return `WriteOutput`, `edit file` must return
+// `EditOutput`, and `patch files` must return `PatchOutput`. The `@Generable` /
+// `@Operation` macros synthesize that per-type machinery from a concrete
+// declaration — and the three outputs share no common `corrective(_:)` factory
+// to generalize over (`WriteOutput` is not even `CorrectiveEncodable`; that
+// protocol governs only *encoding*, not construction) — so no single struct can
+// stand in for all three output types.
 //
 // All behavior-bearing logic — the rejection message — is single-sourced in
-// `FileTool.readOnlyRejectionMessage(forOperation:)`, which both stubs' one-line
-// `execute(in:)` bodies call, so a change to the rejection behavior stays in one
-// place. What remains distinct between the two is only the irreducible macro
-// boilerplate: the two declarations and their differing `Output` types.
+// `FileTool.readOnlyRejectionMessage(forOperation:)`, which all three stubs'
+// one-line `execute(in:)` bodies call, so a change to the rejection behavior
+// stays in one place. What remains distinct between them is only the
+// irreducible macro boilerplate: the declarations and their differing `Output`
+// types.
 
 /// The `write file` stub for the read-only tool: accepts the op but always
 /// returns the read-only corrective without touching the filesystem.
@@ -363,6 +379,30 @@ extension ReadOnlyEditFile {
     /// - Throws: Nothing; the signature carries `throws` to satisfy the
     ///   `OperationDefinition` protocol requirement.
     func execute(in context: FileContext) async throws -> EditOutput {
+        .corrective(FileTool.readOnlyRejectionMessage(forOperation: Self.opString))
+    }
+}
+
+/// The `patch files` stub for the read-only tool: accepts the op but always
+/// returns the read-only corrective without touching the filesystem.
+///
+/// A unit struct, for the same reason as ``ReadOnlyWriteFile``. Declaring no
+/// `patch` parameter, it rejects the operation *before* any parse or engine
+/// work, so a read-only patch never mutates.
+@Generable
+@Operation(verb: "patch", noun: "files", description: "Rejected: patching is not available in a read-only session")
+private struct ReadOnlyPatchFiles: Sendable {
+}
+
+extension ReadOnlyPatchFiles {
+    /// Rejects the patch with the read-only corrective.
+    ///
+    /// - Parameter context: the shared session context (unused; the rejection is
+    ///   structural).
+    /// - Returns: a ``PatchOutput/corrective(_:)`` naming this operation.
+    /// - Throws: Nothing; the signature carries `throws` to satisfy the
+    ///   `OperationDefinition` protocol requirement.
+    func execute(in context: FileContext) async throws -> PatchOutput {
         .corrective(FileTool.readOnlyRejectionMessage(forOperation: Self.opString))
     }
 }

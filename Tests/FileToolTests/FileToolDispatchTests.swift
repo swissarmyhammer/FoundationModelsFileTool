@@ -16,7 +16,7 @@ import Testing
 /// full missing-`op` inference matrix (every precedence branch and the
 /// undeterminable case); the read-only tool rejecting mutations with the
 /// corrective and allowing read/glob/grep; and the rendered schema carrying
-/// exactly the five op strings.
+/// exactly the six op strings.
 @Suite struct FileToolDispatchTests {
     // MARK: Test scaffolding
 
@@ -219,13 +219,13 @@ import Testing
         #expect(FileTool.inferOperation(from: Self.payload([("mystery", "x")])) == nil)
     }
 
-    @Test func undeterminablePayloadDispatchYieldsCorrectiveNamingAllFiveOps() async throws {
+    @Test func undeterminablePayloadDispatchYieldsCorrectiveNamingAllSixOps() async throws {
         let (context, _) = try Self.makeContext()
         let tool = try FileTool.make(context: context)
 
         let message = try await tool.call(arguments: Self.payload([("mystery", "x")]))
 
-        for opString in ["read file", "write file", "edit file", "glob files", "grep files"] {
+        for opString in ["read file", "write file", "edit file", "glob files", "grep files", "patch files"] {
             #expect(message.contains(opString))
         }
     }
@@ -290,24 +290,24 @@ import Testing
 
     // MARK: Rendered schema
 
-    @Test func renderedSchemaContainsExactlyTheFiveOpStrings() throws {
+    @Test func renderedSchemaContainsExactlyTheSixOpStrings() throws {
         let (context, _) = try Self.makeContext()
         let tool = try FileTool.make(context: context)
 
         let opEnum = try Self.opEnum(of: tool)
 
-        #expect(Set(opEnum) == Set(["read file", "write file", "edit file", "glob files", "grep files"]))
-        #expect(opEnum.count == 5)
+        #expect(Set(opEnum) == Set(["read file", "write file", "edit file", "glob files", "grep files", "patch files"]))
+        #expect(opEnum.count == 6)
     }
 
-    @Test func readOnlyRenderedSchemaContainsAllFiveOpStrings() throws {
+    @Test func readOnlyRenderedSchemaContainsAllSixOpStrings() throws {
         let (context, _) = try Self.makeContext()
         let tool = try FileTool.makeReadOnly(context: context)
 
         let opEnum = try Self.opEnum(of: tool)
 
-        #expect(Set(opEnum) == Set(["read file", "write file", "edit file", "glob files", "grep files"]))
-        #expect(opEnum.count == 5)
+        #expect(Set(opEnum) == Set(["read file", "write file", "edit file", "glob files", "grep files", "patch files"]))
+        #expect(opEnum.count == 6)
     }
 
     /// The `op` discriminator's enum values, read back from a fused tool's

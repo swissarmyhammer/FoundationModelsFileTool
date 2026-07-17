@@ -88,8 +88,8 @@ comments:
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9780'
 title: 'PatchEngine: two-phase compute-all-then-write multi-file patch application over EditEngine'
 ---
 ## What

@@ -1,6 +1,6 @@
 import Foundation
 
-/// The shared per-session state the five file operations dispatch against.
+/// The shared per-session state the six file operations dispatch against.
 ///
 /// A `FileContext` bundles everything one agent session's file tools need: the
 /// session ``root`` directory, the ``pathGuard`` that validates every path

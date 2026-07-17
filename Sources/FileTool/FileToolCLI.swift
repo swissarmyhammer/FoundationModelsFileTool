@@ -88,7 +88,7 @@ public enum FileToolCLI {
     ///     ``FileContext/root`` bounds every path.
     /// - Returns: the resolved ``Outcome`` to print and exit with.
     /// - Throws: `OperationCLIDriverError` if the fused tool cannot be assembled
-    ///   into a driver (not expected for this fixed five-op tool); rethrows any
+    ///   into a driver (not expected for this fixed six-op tool); rethrows any
     ///   error ``FileTool/make(context:)`` throws while fusing the schema.
     public static func run(arguments: [String], context: FileContext) async throws -> Outcome {
         let tool = try FileTool.make(context: context)
