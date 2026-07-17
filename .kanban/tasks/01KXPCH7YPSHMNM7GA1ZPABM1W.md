@@ -55,6 +55,17 @@ comments:
 
     Verification: `swift test --filter PatchEngineTests` → 15/15 green; full `swift test` → FileToolTests 332/21 and integration 26/7, all green. Package.resolved untouched. Running adversarial double-check.
   timestamp: 2026-07-17T09:11:39.285566+00:00
+- actor: claude-code
+  id: 01kxqp6n0gqy9afv1ebb3417sf
+  text: |-
+    Worked the 2026-07-17 04:13 review finding (computeUpdate four-level nested Result pyramid).
+
+    Flattening: replaced the `validate().flatMap{ resolveDestination().flatMap{ decodeSource().flatMap{ resolveContent().map{ makeUpdateChange } } } }` closure pyramid with four sequential named `let` bindings, each populated by a `switch` on its helper's Result — `case .success(let x): bind` / `case .failure(let failure): return .failure(failure)` — then a final `.success(makeUpdateChange(...))`. This is the file's own idiom: `computeChanges` uses the identical `switch`-on-Result-with-early-return-on-failure pattern, and `EditFile.execute` sequences its whole pipeline (validate → read → decode → normalize → apply) exactly this way. No new helpers introduced; the four extracted helpers (validate/resolveDestination/decodeSource/resolveContent/makeUpdateChange) are unchanged.
+
+    Behavior identical: same validation order (edit → move-dest .write → decode → resolve pairs), same short-circuit on the first failure, same Failure values propagated verbatim, same final makeUpdateChange call with the same four inputs. No error message, outcome, or precedence changed. Pure refactor covered by the existing PatchEngineTests.
+
+    Verification: `swift test --filter PatchEngineTests` → 15/15 green; full `swift test` → FileToolTests 332/21 and integration 26/7, all green (only warning is the pre-existing unrelated mlx-swift build-system bundle warning). Package.resolved untouched.
+  timestamp: 2026-07-17T09:23:28.400246+00:00
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
@@ -100,3 +111,7 @@ Keep the engine free of `@Operation`/wire types — it returns engine-level valu
 ## Review Findings (2026-07-17 03:59)
 
 - [x] `Sources/FileTool/PatchEngine.swift:446` — Removal (unlink) errors are silently swallowed via `try?`, but FileOutcome still reports `.deleted` even if the file remains due to an unlink failure. This creates a contract mismatch where the outcome doesn't accurately reflect whether the operation fully succeeded. The operation layer cannot detect that a delete-action file still exists on disk. Either (1) propagate removal errors and abort the operation, or (2) add a flag to FileOutcome to indicate partial success (some removals failed), or (3) add a test case that simulates unlink failure (e.g., permission denied) and documents that `.deleted` outcome does not guarantee removal actually occurred, and add an explicit log or warning when removal fails so the operation layer can be aware.
+
+## Review Findings (2026-07-17 04:13)
+
+- [x] `Sources/FileTool/PatchEngine.swift:361` — Function computeUpdate has 4 levels of nested Result closures (validate().flatMap{}.flatMap{}.flatMap{}.map{}) forming a deep closure pyramid, making control flow hard to follow despite each layer being simple. Flatten the pyramid by extracting intermediate Result computations into named variables or helper functions that can be composed more linearly.

@@ -329,20 +329,38 @@ public enum PatchEngine {
         pairs: [PatchParser.Pair],
         using pathGuard: PathGuard
     ) -> Result<Change, Failure> {
-        validate(path, for: .edit, using: pathGuard).flatMap { sourceURL in
-            resolveDestination(movePath, using: pathGuard).flatMap { destinationURL in
-                decodeSource(sourceURL).flatMap { decoded in
-                    resolveContent(pairs, in: decoded.text, path: sourceURL.path).map { resolved in
-                        makeUpdateChange(
-                            sourceURL: sourceURL,
-                            destinationURL: destinationURL,
-                            decoded: decoded,
-                            resolved: resolved
-                        )
-                    }
-                }
-            }
+        let sourceURL: URL
+        switch validate(path, for: .edit, using: pathGuard) {
+        case .success(let url): sourceURL = url
+        case .failure(let failure): return .failure(failure)
         }
+
+        let destinationURL: URL?
+        switch resolveDestination(movePath, using: pathGuard) {
+        case .success(let url): destinationURL = url
+        case .failure(let failure): return .failure(failure)
+        }
+
+        let decoded: AtomicWriter.DecodedText
+        switch decodeSource(sourceURL) {
+        case .success(let value): decoded = value
+        case .failure(let failure): return .failure(failure)
+        }
+
+        let resolved: ResolvedContent
+        switch resolveContent(pairs, in: decoded.text, path: sourceURL.path) {
+        case .success(let value): resolved = value
+        case .failure(let failure): return .failure(failure)
+        }
+
+        return .success(
+            makeUpdateChange(
+                sourceURL: sourceURL,
+                destinationURL: destinationURL,
+                decoded: decoded,
+                resolved: resolved
+            )
+        )
     }
 
     /// Resolve an optional move destination, validating it for `.write`.
