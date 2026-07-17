@@ -52,9 +52,7 @@ public enum FileTool {
     ///   `OperationTool.init`'s contract); rethrows `GenerationSchema.SchemaError`
     ///   on any other schema-fusion failure.
     public static func make(context: FileContext) throws -> OperationTool<FileContext> {
-        try OperationTool(
-            name: toolName,
-            description: toolDescription,
+        try makeOperationTool(
             context: context,
             operations: [
                 AnyOperation(ReadFile.self),
@@ -62,8 +60,7 @@ public enum FileTool {
                 AnyOperation(EditFile.self),
                 AnyOperation(GlobFiles.self),
                 AnyOperation(GrepFiles.self),
-            ],
-            resolver: makeResolver()
+            ]
         )
     }
 
@@ -86,9 +83,7 @@ public enum FileTool {
     ///   `OperationTool.init`'s contract); rethrows `GenerationSchema.SchemaError`
     ///   on any other schema-fusion failure.
     public static func makeReadOnly(context: FileContext) throws -> OperationTool<FileContext> {
-        try OperationTool(
-            name: toolName,
-            description: toolDescription,
+        try makeOperationTool(
             context: context,
             operations: [
                 AnyOperation(ReadFile.self),
@@ -96,7 +91,35 @@ public enum FileTool {
                 AnyOperation(ReadOnlyEditFile.self),
                 AnyOperation(GlobFiles.self),
                 AnyOperation(GrepFiles.self),
-            ],
+            ]
+        )
+    }
+
+    /// Builds a fused `files` ``OperationTool`` over the given operation set.
+    ///
+    /// ``make(context:)`` and ``makeReadOnly(context:)`` differ only in which
+    /// operations they fuse; this helper owns the shared identity, context, and
+    /// resolver wiring so that construction pattern lives in exactly one place.
+    ///
+    /// - Parameters:
+    ///   - context: the shared session context every operation's `execute(in:)`
+    ///     runs against.
+    ///   - operations: the operation set to fuse, in schema order.
+    /// - Returns: the fused `files` tool over `operations`.
+    /// - Throws: `SchemaFusionError.reservedParameterName` if an operation
+    ///   declares a parameter colliding with the `op` discriminator (not
+    ///   expected for this fixed operation set, but propagated per
+    ///   `OperationTool.init`'s contract); rethrows `GenerationSchema.SchemaError`
+    ///   on any other schema-fusion failure.
+    private static func makeOperationTool(
+        context: FileContext,
+        operations: [AnyOperation<FileContext>]
+    ) throws -> OperationTool<FileContext> {
+        try OperationTool(
+            name: toolName,
+            description: toolDescription,
+            context: context,
+            operations: operations,
             resolver: makeResolver()
         )
     }

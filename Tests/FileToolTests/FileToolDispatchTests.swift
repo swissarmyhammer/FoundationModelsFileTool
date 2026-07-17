@@ -171,6 +171,14 @@ import Testing
         #expect(FileTool.inferOperation(from: Self.payload([("new_string", ["x"])])) == "edit file")
     }
 
+    @Test func infersEditFromUppercaseAliasKey() {
+        #expect(FileTool.inferOperation(from: Self.payload([("OLD_STRING", ["x"])])) == "edit file")
+    }
+
+    @Test func infersWriteFromMixedCaseContentKey() {
+        #expect(FileTool.inferOperation(from: Self.payload([("Content", "x")])) == "write file")
+    }
+
     @Test func infersWriteFromContentKey() {
         #expect(FileTool.inferOperation(from: Self.payload([("content", "x")])) == "write file")
     }
