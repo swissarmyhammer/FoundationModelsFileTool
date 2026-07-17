@@ -84,20 +84,28 @@ comments:
 
     The rest of the file already complied (`case .marker(let marker)`, `case .add(let path)`, `case .success(let hunk)`, `case .marker(.move(let destination))` etc.) — only this one `Equatable` switch used the tuple `case let` form, because hand-written `==` over a tuple-pattern is the one place the shorthand is tempting.
 
-    **Verification:** `swift test` → **343 unit / 22 suites + 26 integration / 7 suites, 0 failures**, exit 0. Counts identical to baseline, as required for a pure style change. (The `mlx-swift_Cmlx.bundle` "missing creator for mutated node" warning is a pre-existing SwiftPM build-system warning, unrelated.) `git diff --stat` on source: `PatchParser.swift | 6 +++---` — 3 lines, 1 file, nothing else.
+    **Verification:** `swift test` → **343 unit / 22 suites + 26 integration / 7 suites, 0 failures**, exit 0. Counts identical to baseline, as required for a pure style change. (The `mlx-swift_Cmlx.bundle` "missing creator for mutated node" warning is a pre-existing SwiftPM build-system warning, unrelated.) `git diff --stat` on source: `PatchParser.swift | 6 +++
+- actor: claude-code
+  id: 01kxr0v5mnskmcfevmq3k8yxzc
+  text: |-
+    Iteration 2 complete — task is in `done`. Checkpoint `1dee048` ("style(patch): bind case variables individually in Hunk Equatable") committed locally, NOT pushed. `/test` verified green independently: 343 unit / 22 suites + 26 integration / 7 suites, 0 failures — counts identical to baseline, as required for a pure style change. `/review 82vewg7 HEAD~1..HEAD` returned **clean** (0 findings, 1 refuted, 14 attempted) and promoted the task to `done`. All 12 findings across both rounds are `[x]`.
 
-    **double-check verdict: PASS.** It specifically verified the highest-risk failure mode — an `lPath`/`rPath` swap across the tuple operands would still compile and silently break `Equatable` by comparing a value to itself. No swap occurred; arity matches each enum case's payload count (addFile 2, deleteFile 1, updateFile 3); the comparison bodies are untouched.
+    Note on the 3 style findings: they cited `:341/:344/:346` but the actual sites were at `:544/:546/:548` — the review ran against pre-`c8bc55e` line numbering and iteration 1's `parseUpdate` split shifted the file ~200 lines down. Implementer matched on quoted code, not line numbers. Worth knowing when findings from an earlier checkpoint are worked after a large refactor.
 
-    ## For the next agent
+    ## ⚠️ Data integrity issue on this card
 
-    **Did NOT run `swift format`.** The landmine from iteration 1 stands — see the earlier comment. Hand-edited in 4-space; verified no unrelated file was reformatted.
+    This task's record is **corrupted**. `get task` now returns `title: "Untitled"` (was "Review of 427454b..HEAD (EditMatch unicode rung + patch files chain)") and the `description` field has iteration-2's comment text prepended to it, including leaked YAML frontmatter fragments (`timestamp:`, `position_column: doing`, `position_ordinal: '80'`, `title: ...`) sitting inside the description body. The findings checklists survived intact below the leak.
 
-    **Two `case let` sites remain ELSEWHERE in the repo, deliberately untouched** (scope was this file only): `Sources/FileTool/FileTool.swift:276` (`guard case let .structure(properties, _)`) and `Sources/FileTool/FileWalker.swift:148` (`for case let url as URL`). If this rule is ever applied repo-wide it will surface both — note the `FileWalker` one is a `for case let x as T` conditional cast, which has **no clean `let`-inside-pattern rewrite** and would need a rule exception rather than a mechanical conversion. That would be its own task.
+    This looks like a sah kanban serialization bug where a comment write bled into the description/frontmatter rather than anything the work did. Flagging rather than hand-repairing: the task is legitimately `done` (progress 1.0, all findings checked, clean review), so editing the description now would only muddy the evidence trail. A separate committer agent also observed the `.kanban/` files flipping from untracked to modified mid-session, suggesting a concurrent writer — possibly related.
 
-    **Residual test-helper duplication** (`readBytes`, `bytes`, `outcome`/`file` overlap) was left alone per the standing exception, as instructed. Expect it to surface and be dropped again next pass — not a gate.
-  timestamp: 2026-07-17T12:22:08.812052+00:00
-position_column: doing
-position_ordinal: '80'
+    ## Left deliberately undone (each would be its own task, not invented here)
+
+    1. **No `.swift-format` config is checked in.** The generic Swift guideline says to run `swift format -i -r Sources Tests`; doing so here reformats ~40 unrelated files (4-space repo vs 2-space toolchain default) and breaks `DocCCoverageTests` by wrapping `@Operation(...)` across lines, detaching `///` comments from the structs `DocCCoverageScanner` keys on.
+    2. **Two `case let` sites remain elsewhere**: `Sources/FileTool/FileTool.swift:276` (`guard case let .structure(properties, _)`) and `Sources/FileTool/FileWalker.swift:148` (`for case let url as URL`). The FileWalker one is a `for case let x as T` conditional cast with no clean `let`-inside-pattern rewrite — it needs a rule exception, not a mechanical conversion.
+    3. **Residual test-helper duplication** (`readBytes`, `bytes`, `outcome`/`file` overlap) in pre-existing test code — dropped every pass by the standing exception, not a gate.
+  timestamp: 2026-07-17T12:29:26.549344+00:00
+position_column: done
+position_ordinal: '9980'
 title: Review of 427454b..HEAD (EditMatch unicode rung + patch files chain)
 ---
 Scope: 427454b..HEAD (12 commits — EditMatch Unicode confusable rung `^244g3fd`, PatchParser `^9davh0r`, patch substrate `^k17msbm`, PatchEngine `^zpabm1w`, `patch files` op `^rr6cmam`)
