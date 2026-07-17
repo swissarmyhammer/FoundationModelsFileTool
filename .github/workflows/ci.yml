@@ -23,5 +23,14 @@ jobs:
       - name: Build
         run: swift build
 
+      # Belt-and-suspenders for the real-LSP integration tier (plan §9.6): the
+      # error-detection suite skips locally when sourcekit-lsp is absent, and its
+      # in-suite CI gate turns that absence into a failure when `CI` is set — but
+      # asserting the tool here too means the job fails fast and unmistakably if
+      # the runner image ever ships without sourcekit-lsp, so the LSP tier can
+      # never silently vanish from CI.
+      - name: Assert sourcekit-lsp is available
+        run: xcrun --find sourcekit-lsp
+
       - name: Test
         run: swift test

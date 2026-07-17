@@ -55,11 +55,41 @@ public final class FileContext: Sendable {
     ///   - eagerWarmup: whether the diagnostics bridge best-effort warms the
     ///     project enclosing ``root`` at creation rather than lazily on the first
     ///     diagnosable mutation; defaults to `false`.
-    public init(root: URL, readOnly: Bool = false, allowSymlinks: Bool = false, eagerWarmup: Bool = false) {
+    public convenience init(root: URL, readOnly: Bool = false, allowSymlinks: Bool = false, eagerWarmup: Bool = false) {
+        self.init(
+            root: root,
+            readOnly: readOnly,
+            allowSymlinks: allowSymlinks,
+            diagnostics: DiagnosticsBridge(root: root, eagerWarmup: eagerWarmup)
+        )
+    }
+
+    /// Creates a session context around an already-configured diagnostics bridge.
+    ///
+    /// The dependency-injecting initializer behind the public convenience
+    /// ``init(root:readOnly:allowSymlinks:eagerWarmup:)`` (which builds a default
+    /// bridge and forwards here). A caller that needs a bridge tuned beyond what
+    /// the convenience initializer exposes — a non-default settle window or hard
+    /// timeout, or a bridge sharing a `CodeContextManager` with another bridge —
+    /// builds the ``DiagnosticsBridge`` itself and hands it in, so the shared
+    /// context still owns exactly one bridge for the life of the session.
+    ///
+    /// The bridge's ``DiagnosticsBridge/stop()`` is still reached through
+    /// ``stop()``, so the same structured teardown applies however the bridge was
+    /// built.
+    ///
+    /// - Parameters:
+    ///   - root: the session working directory; also the ``pathGuard`` workspace
+    ///     boundary and relative-path base.
+    ///   - readOnly: whether to forbid mutating operations.
+    ///   - allowSymlinks: whether the guard resolves symlinks rather than
+    ///     rejecting them.
+    ///   - diagnostics: the pre-configured diagnostics bridge the session owns.
+    init(root: URL, readOnly: Bool, allowSymlinks: Bool, diagnostics: DiagnosticsBridge) {
         self.root = root
         self.readOnly = readOnly
         self.pathGuard = PathGuard(root: root, workspaceRoot: root, allowSymlinks: allowSymlinks)
-        self.diagnostics = DiagnosticsBridge(root: root, eagerWarmup: eagerWarmup)
+        self.diagnostics = diagnostics
     }
 
     /// Tears the session down, closing every workspace the diagnostics bridge opened.

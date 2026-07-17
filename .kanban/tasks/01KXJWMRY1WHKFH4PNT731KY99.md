@@ -29,10 +29,14 @@ comments:
   id: 01kxptmvcq0z88sc1smpb5ma82
   text: 'Iteration 1: implement landed green. Wired upstream OperationCLIDriver over fused files tool, default CLI mode. Convergence/exit logic in IMPORTABLE Sources/FileTool/FileToolCLI.swift (not buried in main): FileToolCLI.run(arguments:context:) builds OperationCLIDriver(tool: FileTool.make(context:), executableName:"file-demo") + runs it — all parsing/dispatch is the stock driver, nothing hand-rolled; single-tool collapses tool level → <noun> <verb> grammar (file: read/write/edit; files: glob/grep). Corrective→nonzero exit added in pure testable resolveOutcome(output:exitCode:): 5 ops encode corrective as {"corrective":...}, detected + remapped to nonzero w/ just the message; ArgumentParser parse errors pass through nonzero; success JSON/help/usage/completion pass through. main.swift thin: builds FileContext rooted at CWD (PathGuard bounds paths there), forwards argv, prints stdout/stderr, exits resolved code. Package.swift: added OperationsCLI product to FileTool target (importable by main + tests). CLIDriverTests.swift 9: per-op convergence (argv-path output == model-path payload output, canonicalized JSON stripping grep''s volatile elapsedMs) exercising every output-affecting param; help snapshot; unknown noun/verb (nonzero + usage); corrective exit; pure resolveOutcome matrix. swift build builds file-demo; every op CLI-invocable vs real dir (manually verified read/write/edit/glob/grep + corrective + unknown). double-check REVISE→4 addressed (documented unreachable upstream string-corrective channel; convergence docstring→output-identity; file-noun help assertion disambiguated; named fatal exit-code literal). swift test --filter CLIDriverTests 9/9; full 251 unit + 1 integration green, 0 warnings. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-17T01:21:53.559494+00:00
+- actor: claude-code
+  id: 01kxpv20hgcc8wq9xe5mwj3af5
+  text: 'DONE. Iteration 1 re-review clean (full 14/0, 0 findings) — first-try clean (front-loaded conventions + importable testable design paid off). Task moved doing→review→done. OperationCLIDriver wired over fused files tool (default mode), convergence + corrective→nonzero-exit logic in importable FileToolCLI.swift, main.swift thin, per-op argv↔model-path convergence tested. Verified-good local commit: 60eacf9 (green 252/252, file-demo builds). Not pushed.'
+  timestamp: 2026-07-17T01:29:04.816681+00:00
 depends_on:
 - 01KXJWMBD3KHJRTDMAVE1V3F9R
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '8e80'
 title: CLI driver wiring (file-demo default mode)
 ---
 ## What
