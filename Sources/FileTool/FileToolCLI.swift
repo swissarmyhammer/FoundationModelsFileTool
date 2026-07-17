@@ -25,6 +25,17 @@ public enum FileToolCLI {
     /// The executable name shown in usage and help text.
     public static let executableName = "file-demo"
 
+    /// The first-argument flag selecting script mode (stdin JSON operation lines).
+    ///
+    /// Single-sourced here — alongside ``executableName`` — so the executable's
+    /// mode dispatch and the tests that spawn it name the same string.
+    public static let scriptModeFlag = "--script"
+
+    /// The first-argument flag selecting chat mode (a live `LanguageModelSession`).
+    ///
+    /// Single-sourced here for the same reason as ``scriptModeFlag``.
+    public static let chatModeFlag = "--chat"
+
     // MARK: Outcome
 
     /// The resolved result of one CLI invocation: the text to emit, whether it

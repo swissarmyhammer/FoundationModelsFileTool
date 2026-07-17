@@ -85,7 +85,10 @@ let package = Package(
         // the same reach into internals.
         .testTarget(
             name: "FileToolIntegrationTests",
-            dependencies: ["FileTool"]
+            // Depends on the `file-demo` executable (not for linking, but to force
+            // SwiftPM to build it) so `ScriptModeTests` can spawn the just-built
+            // `file-demo --script` binary from the shared products directory.
+            dependencies: ["FileTool", "file-demo"]
         ),
     ]
 )

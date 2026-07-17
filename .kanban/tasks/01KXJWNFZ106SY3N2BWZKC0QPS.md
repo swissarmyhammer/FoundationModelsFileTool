@@ -72,10 +72,14 @@ comments:
   id: 01kxq1e8gch35vgmjgtxe9g874
   text: 'Iteration 2: 3 findings fixed at root. Extracted shared Support/FusedToolWorkspace.swift → enum FusedToolWorkspace.withFusedTool(named:readOnly:){tool,context,root in…} accessible to both test classes; reproduces exact scaffolding (withIsolatedWorkspace → FileContext(root:readOnly:) → FileTool.make/makeReadOnly → body → context.stop() every exit path do/catch/stop); readOnly:true axis pairs read-only context w/ makeReadOnly; fused type stays fully-qualified Operations.OperationTool<FileContext> to avoid colliding w/ per-file private typealias FusedFilesTool. Deleted old per-class withByteFixture. Swept BOTH files, routed all sites (more than the 3 cited, all one root): CrossOpFlowTests globThenGrepThenEdit/gitignore/parallelReads/concurrentEdits/3 byte-preservation; EditsOKTests nonDiagnosable/readOnlyNeverTriggers. Genuine warm-context matrices (editsOKMatrix, writeReadEditByAnchorSettlesClean) keep own eagerWarmup:true+warmUp scaffolding — different pattern, correctly NOT routed. Behavior-identical (double-check PASS: every #expect/Issue.record diffed HEAD-vs-tree, no drop/weaken/reorder; teardown preserved success+throw; FileContext default eagerWarmup:false spawns no warmup Task so moving fixture writes into body is safe). No Sources/seam/Package.resolved touched. swift test --filter EditsOKTests|CrossOpFlowTests 11/11; full 251 unit + 16 integration green ~24s warm. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-17T03:20:37.644059+00:00
+- actor: claude-code
+  id: 01kxq1rxg2w6jhxx8krbfp3106
+  text: 'DONE. Iteration 2 re-review clean (full 14/0, 0 findings). All 3 duplication findings resolved. Task moved doing→review→done. Converged in 2 iterations (findings/round: 3→0; all one root — extracted shared FusedToolWorkspace.withFusedTool). Real-LSP edits-OK + cross-op-flow + byte-preservation + gitignore + concurrency suite. Verified-good local commit: d8e517f (green 267/267, real LSP, stable). Not pushed. Checkpoint commits: 9d23fdc, d8e517f.'
+  timestamp: 2026-07-17T03:26:26.818348+00:00
 depends_on:
 - 01KXJWN2G2Z6MV4N7RSD96HKPG
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9080'
 title: 'Integration suite B: edits-OK paths + cross-op flows in isolated directories'
 ---
 ## What
