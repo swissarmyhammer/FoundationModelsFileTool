@@ -541,11 +541,11 @@ extension PatchParser.Hunk: Equatable {
     /// - Returns: `true` when the two hunks are the same case with equal payloads.
     public static func == (lhs: PatchParser.Hunk, rhs: PatchParser.Hunk) -> Bool {
         switch (lhs, rhs) {
-        case let (.addFile(lPath, lContents), .addFile(rPath, rContents)):
+        case (.addFile(let lPath, let lContents), .addFile(let rPath, let rContents)):
             return lPath == rPath && lContents == rContents
-        case let (.deleteFile(lPath), .deleteFile(rPath)):
+        case (.deleteFile(let lPath), .deleteFile(let rPath)):
             return lPath == rPath
-        case let (.updateFile(lPath, lMove, lPairs), .updateFile(rPath, rMove, rPairs)):
+        case (.updateFile(let lPath, let lMove, let lPairs), .updateFile(let rPath, let rMove, let rPairs)):
             return lPath == rPath && lMove == rMove && pairsEqual(lPairs, rPairs)
         default:
             return false

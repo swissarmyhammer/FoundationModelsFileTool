@@ -57,6 +57,45 @@ comments:
 
     **Test rigor:** the new test passed first run; implementer mutation-checked it (`note == nil` → `note != nil`) and confirmed it fails at the expected assertion, so it is not passing vacuously.
   timestamp: 2026-07-17T12:02:53.750723+00:00
+- actor: claude-code
+  id: 01kxr0560jhnhwttq7v30vxm9c
+  text: |-
+    Iteration 1 complete. Checkpoint `c8bc55e` ("refactor: consolidate test helpers and flatten parseUpdate", 15 files, +341/-232) committed locally — NOT pushed. `/test` verified green independently of implement's claim: 343 unit / 22 suites + 26 integration / 7 suites, 0 failures.
+
+    `/review 82vewg7 HEAD~1..HEAD` verdict: **all 9 prior findings checked `[x]` — iteration 1's work is accounted for — but 3 NEW findings on the checkpoint delta.** Task stays in `review`, does not advance to `done`. Engine: 8 confirmed / 1 refuted / 14 attempted; 5 dropped per the standing test-refactor exception.
+
+    New findings are all one rule, one file — `case let .pattern(x, y)` should be `case .pattern(let x, let y)` in `Sources/FileTool/PatchParser.swift` at :341, :344, :346. Fixing at the root means sweeping the whole file for `case let` so re-review finds zero recurrences, not just patching the 3 cited lines.
+
+    **Recurring-but-not-a-gate:** the engine now flags residual test-helper duplication the consolidation pass didn't reach — `readBytes(_:)` (EditFileTests:63 / WriteFileTests:43) and `bytes(_:)` (PatchEngineTests:79 / PatchFilesTests:54), plus `outcome(in:endingWith:)` overlapping `PatchFilesTests.file(in:endingWith:)`. These target pre-existing test code, so the standing exception drops them every pass. They will keep surfacing and keep being dropped — do not chase them, they are not a gate on this task.
+  timestamp: 2026-07-17T12:17:26.034893+00:00
+- actor: claude-code
+  id: 01kxr0dt5cgx9a0v6rpp8htrdn
+  text: |-
+    Iteration 2 — all 3 findings from the 2026-07-17 07:07 round addressed and checked `[x]`. Task left in `doing`, green, uncommitted.
+
+    **The cited set WAS the complete set.** Swept the entire `Sources/FileTool/PatchParser.swift` for every `case let` / `if case let` / `guard case let` / `for case let` / `while case let` — found exactly 3, the same 3 the findings named. Unlike iteration 1 (where the sweep found MORE copies than cited), there was nothing extra to convert here. A re-review of this file will find zero recurrences; re-grep confirms zero survivors.
+
+    **Line numbers had drifted.** Findings cite :341/:344/:346; the sites were actually at :544/:546/:548 — the review ran against pre-`c8bc55e` line numbering while `parseUpdate`'s split shifted the file down ~200 lines. Same three sites, matched by content not by line. Next agent: match findings on the quoted code, not the cited line number, on this card.
+
+    **Converted (3 cited / 3 swept), in `PatchParser.Hunk: Equatable ==`:**
+    - `case let (.addFile(lPath, lContents), ...)` → `case (.addFile(let lPath, let lContents), ...)`
+    - `case let (.deleteFile(lPath), ...)` → `case (.deleteFile(let lPath), ...)`
+    - `case let (.updateFile(lPath, lMove, lPairs), ...)` → `case (.updateFile(let lPath, let lMove, let lPairs), ...)`
+
+    The rest of the file already complied (`case .marker(let marker)`, `case .add(let path)`, `case .success(let hunk)`, `case .marker(.move(let destination))` etc.) — only this one `Equatable` switch used the tuple `case let` form, because hand-written `==` over a tuple-pattern is the one place the shorthand is tempting.
+
+    **Verification:** `swift test` → **343 unit / 22 suites + 26 integration / 7 suites, 0 failures**, exit 0. Counts identical to baseline, as required for a pure style change. (The `mlx-swift_Cmlx.bundle` "missing creator for mutated node" warning is a pre-existing SwiftPM build-system warning, unrelated.) `git diff --stat` on source: `PatchParser.swift | 6 +++---` — 3 lines, 1 file, nothing else.
+
+    **double-check verdict: PASS.** It specifically verified the highest-risk failure mode — an `lPath`/`rPath` swap across the tuple operands would still compile and silently break `Equatable` by comparing a value to itself. No swap occurred; arity matches each enum case's payload count (addFile 2, deleteFile 1, updateFile 3); the comparison bodies are untouched.
+
+    ## For the next agent
+
+    **Did NOT run `swift format`.** The landmine from iteration 1 stands — see the earlier comment. Hand-edited in 4-space; verified no unrelated file was reformatted.
+
+    **Two `case let` sites remain ELSEWHERE in the repo, deliberately untouched** (scope was this file only): `Sources/FileTool/FileTool.swift:276` (`guard case let .structure(properties, _)`) and `Sources/FileTool/FileWalker.swift:148` (`for case let url as URL`). If this rule is ever applied repo-wide it will surface both — note the `FileWalker` one is a `for case let x as T` conditional cast, which has **no clean `let`-inside-pattern rewrite** and would need a rule exception rather than a mechanical conversion. That would be its own task.
+
+    **Residual test-helper duplication** (`readBytes`, `bytes`, `outcome`/`file` overlap) was left alone per the standing exception, as instructed. Expect it to surface and be dropped again next pass — not a gate.
+  timestamp: 2026-07-17T12:22:08.812052+00:00
 position_column: doing
 position_ordinal: '80'
 title: Review of 427454b..HEAD (EditMatch unicode rung + patch files chain)
@@ -78,3 +117,13 @@ Note: three additional engine findings (duplicated helpers at `EditFileTests.swi
 - [x] `Tests/FileToolTests/PatchFilesTests.swift:20` — Helper function `payload(_:)` is identically duplicated in FileToolDispatchTests.swift; should extract to shared test utility. Extract to shared test helper module and call from both files.
 - [x] `Tests/FileToolTests/PatchFilesTests.swift:47` — Helper function `path(_:in:)` is identically duplicated in PatchEngineTests.swift; should extract to shared test utility. Extract to shared test helper module and call from both files.
 - [x] `Tests/FileToolTests/PatchFilesTests.swift:74` — The unnamed first parameter causes the call site to read awkwardly. `Self.file(files, endingWith:)` reads as "file files ending with…" instead of forming a clear grammatical phrase. The first argument should be labeled for clarity. Change to `private static func file(in files: [PatchFileResult], endingWith suffix: String)` or similar, so the call reads `file(in:endingWith:)` forming a clearer phrase. #review
+
+## Review Findings (2026-07-17 07:07)
+
+Scope: `HEAD~1..HEAD` (c8bc55e — "refactor: consolidate test helpers and flatten parseUpdate").
+
+Note: five additional engine findings (duplicated helpers at `EditFileTests.swift:63`, `PatchEngineTests.swift:79`, `PatchEngineTests.swift:90`, `PatchFilesTests.swift:54`, `WriteFileTests.swift:43`) were dropped per the standing exception — their subject is refactoring/deduplicating pre-existing test code, out of scope for this change.
+
+- [x] `Sources/FileTool/PatchParser.swift:341` — Case binding uses `case let .pattern(x, y)` form instead of `case .pattern(let x, let y)`. The rule mandates binding each case variable with its own `let` inside the pattern for clarity. Rewrite as `case (.addFile(let lPath, let lContents), .addFile(let rPath, let rContents)):`.
+- [x] `Sources/FileTool/PatchParser.swift:344` — Case binding uses `case let .pattern(x, y)` form instead of `case .pattern(let x, let y)`. The rule mandates binding each case variable with its own `let` inside the pattern for clarity. Rewrite as `case (.deleteFile(let lPath), .deleteFile(let rPath)):`.
+- [x] `Sources/FileTool/PatchParser.swift:346` — Case binding uses `case let .pattern(x, y)` form instead of `case .pattern(let x, let y)`. The rule mandates binding each case variable with its own `let` inside the pattern for clarity. Rewrite as `case (.updateFile(let lPath, let lMove, let lPairs), .updateFile(let rPath, let rMove, let rPairs)):`.
