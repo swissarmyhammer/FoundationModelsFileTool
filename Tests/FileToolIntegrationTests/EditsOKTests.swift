@@ -300,30 +300,22 @@ struct EditsOKTests {
     /// A non-diagnosable file (`README.md`, `.json`) is `skipped` and never opens
     /// a workspace, so the bridge's `CodeContext` manager stays untouched.
     @Test func nonDiagnosableFilesAreSkippedAndLeaveCodeContextUntouched() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "EditsOKNonDiagnosable") { root in
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
-                for name in ["README.md", "notes.json"] {
-                    let output = try await DiagnosticsProbe.callTool(
-                        tool,
-                        arguments: DiagnosticsProbe.payload([
-                            ("op", "write file"),
-                            ("filePath", root.appendingPathComponent(name).path),
-                            ("content", "{\n}\n"),
-                        ])
-                    )
-                    let diagnostics = DiagnosticsProbe.diagnostics(fromToolOutput: output)
-                    #expect(diagnostics?.status == IntegrationWire.skipped, "\(name): expected skipped, got \(String(describing: diagnostics?.status))")
-                    #expect(diagnostics?.note == DiagnosticsBridge.nonDiagnosableNote, "\(name): expected the non-diagnosable note")
-                }
-                let openRoots = await context.diagnostics.openRootDirectories()
-                #expect(openRoots.isEmpty, "a non-diagnosable write must never open a CodeContext workspace")
-            } catch {
-                await context.stop()
-                throw error
+        try await FusedToolWorkspace.withFusedTool(named: "EditsOKNonDiagnosable") { tool, context, root in
+            for name in ["README.md", "notes.json"] {
+                let output = try await DiagnosticsProbe.callTool(
+                    tool,
+                    arguments: DiagnosticsProbe.payload([
+                        ("op", "write file"),
+                        ("filePath", root.appendingPathComponent(name).path),
+                        ("content", "{\n}\n"),
+                    ])
+                )
+                let diagnostics = DiagnosticsProbe.diagnostics(fromToolOutput: output)
+                #expect(diagnostics?.status == IntegrationWire.skipped, "\(name): expected skipped, got \(String(describing: diagnostics?.status))")
+                #expect(diagnostics?.note == DiagnosticsBridge.nonDiagnosableNote, "\(name): expected the non-diagnosable note")
             }
-            await context.stop()
+            let openRoots = await context.diagnostics.openRootDirectories()
+            #expect(openRoots.isEmpty, "a non-diagnosable write must never open a CodeContext workspace")
         }
     }
 
@@ -332,31 +324,23 @@ struct EditsOKTests {
     /// The read-only tool rejects a write and an edit with a corrective and never
     /// engages the diagnostics bridge.
     @Test func readOnlyToolNeverTriggersTheBridge() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "EditsOKReadOnly") { root in
-            let context = FileContext(root: root, readOnly: true)
-            do {
-                let tool = try FileTool.makeReadOnly(context: context)
-                for op in ["write file", "edit file"] {
-                    let output = try await DiagnosticsProbe.callTool(
-                        tool,
-                        arguments: DiagnosticsProbe.payload([
-                            ("op", op),
-                            ("filePath", root.appendingPathComponent("target.swift").path),
-                            ("content", "let readOnlyValue = 0\n"),
-                            ("find", ["a"]),
-                            ("replace", ["b"]),
-                        ])
-                    )
-                    let corrective = OperationOutput.decode(DecodedCorrective.self, from: output)
-                    #expect(corrective?.corrective.isEmpty == false, "\(op): expected a read-only corrective")
-                }
-                let openRoots = await context.diagnostics.openRootDirectories()
-                #expect(openRoots.isEmpty, "the read-only tool must never open a CodeContext workspace")
-            } catch {
-                await context.stop()
-                throw error
+        try await FusedToolWorkspace.withFusedTool(named: "EditsOKReadOnly", readOnly: true) { tool, context, root in
+            for op in ["write file", "edit file"] {
+                let output = try await DiagnosticsProbe.callTool(
+                    tool,
+                    arguments: DiagnosticsProbe.payload([
+                        ("op", op),
+                        ("filePath", root.appendingPathComponent("target.swift").path),
+                        ("content", "let readOnlyValue = 0\n"),
+                        ("find", ["a"]),
+                        ("replace", ["b"]),
+                    ])
+                )
+                let corrective = OperationOutput.decode(DecodedCorrective.self, from: output)
+                #expect(corrective?.corrective.isEmpty == false, "\(op): expected a read-only corrective")
             }
-            await context.stop()
+            let openRoots = await context.diagnostics.openRootDirectories()
+            #expect(openRoots.isEmpty, "the read-only tool must never open a CodeContext workspace")
         }
     }
 

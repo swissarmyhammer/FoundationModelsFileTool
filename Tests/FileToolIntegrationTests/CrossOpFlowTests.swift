@@ -111,32 +111,24 @@ struct CrossOpFlowTests {
     /// A glob narrows the files, a grep finds a line within them, and an edit
     /// rewrites the matched line — chained through full dispatch.
     @Test func globThenGrepThenEdit() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "CrossOpGlobGrepEdit") { root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpGlobGrepEdit") { tool, _, root in
             try IsolatedWorkspace.write("needle here\n", to: root.appendingPathComponent("alpha.txt"))
             try IsolatedWorkspace.write("haystack only\n", to: root.appendingPathComponent("beta.txt"))
             try IsolatedWorkspace.write("needle in markdown\n", to: root.appendingPathComponent("gamma.md"))
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
 
-                let glob = try #require(try await callGlob(tool, pattern: "*.txt", path: root.path))
-                #expect(Set(glob.files) == ["alpha.txt", "beta.txt"], "glob must match the two .txt files and not the .md")
+            let glob = try #require(try await callGlob(tool, pattern: "*.txt", path: root.path))
+            #expect(Set(glob.files) == ["alpha.txt", "beta.txt"], "glob must match the two .txt files and not the .md")
 
-                // Scope the grep to the globbed .txt files, so the .md that also
-                // contains "needle" is excluded — the glob → grep narrowing.
-                let grep = try #require(try await callGrep(tool, pattern: "needle", path: root.path, glob: "*.txt"))
-                let matchedFiles = Set((grep.matches ?? []).filter(\.isMatch).map(\.file))
-                #expect(matchedFiles == ["alpha.txt"], "grep must match only the globbed .txt file whose line contains the needle")
+            // Scope the grep to the globbed .txt files, so the .md that also
+            // contains "needle" is excluded — the glob → grep narrowing.
+            let grep = try #require(try await callGrep(tool, pattern: "needle", path: root.path, glob: "*.txt"))
+            let matchedFiles = Set((grep.matches ?? []).filter(\.isMatch).map(\.file))
+            #expect(matchedFiles == ["alpha.txt"], "grep must match only the globbed .txt file whose line contains the needle")
 
-                let edit = try #require(try await callEdit(tool, path: root.appendingPathComponent("alpha.txt").path, find: ["needle here"], replace: ["needle edited"]))
-                #expect(edit.status == IntegrationWire.applied, "the chained edit should apply")
-                let onDisk = try String(contentsOf: root.appendingPathComponent("alpha.txt"), encoding: .utf8)
-                #expect(onDisk == "needle edited\n", "the edit must rewrite the grepped line")
-            } catch {
-                await context.stop()
-                throw error
-            }
-            await context.stop()
+            let edit = try #require(try await callEdit(tool, path: root.appendingPathComponent("alpha.txt").path, find: ["needle here"], replace: ["needle edited"]))
+            #expect(edit.status == IntegrationWire.applied, "the chained edit should apply")
+            let onDisk = try String(contentsOf: root.appendingPathComponent("alpha.txt"), encoding: .utf8)
+            #expect(onDisk == "needle edited\n", "the edit must rewrite the grepped line")
         }
     }
 
@@ -145,39 +137,31 @@ struct CrossOpFlowTests {
     /// An ignored file is invisible to `glob` and `grep` (the git-aware walk
     /// excludes it) yet remains readable by explicit path.
     @Test func gitignoredFileIsInvisibleToWalkButReadableByPath() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "CrossOpGitignore") { root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpGitignore") { tool, _, root in
             try IsolatedWorkspace.write("ignored.txt\n", to: root.appendingPathComponent(".gitignore"))
             try IsolatedWorkspace.write("visible content\n", to: root.appendingPathComponent("visible.txt"))
             try IsolatedWorkspace.write("secret content\n", to: root.appendingPathComponent("ignored.txt"))
             // `add --all` respects `.gitignore`, so `ignored.txt` stays untracked
             // and `git ls-files --exclude-standard` (the walk's source) omits it.
             try IsolatedWorkspace.initializeGitRepository(at: root)
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
 
-                let glob = try #require(try await callGlob(tool, pattern: "*.txt", path: root.path))
-                #expect(glob.files == ["visible.txt"], "glob must not surface the gitignored file")
+            let glob = try #require(try await callGlob(tool, pattern: "*.txt", path: root.path))
+            #expect(glob.files == ["visible.txt"], "glob must not surface the gitignored file")
 
-                let grep = try #require(try await callGrep(tool, pattern: "content", path: root.path))
-                let grepFiles = Set((grep.matches ?? []).map(\.file))
-                #expect(grepFiles == ["visible.txt"], "grep must not descend into or scan the gitignored file")
+            let grep = try #require(try await callGrep(tool, pattern: "content", path: root.path))
+            let grepFiles = Set((grep.matches ?? []).map(\.file))
+            #expect(grepFiles == ["visible.txt"], "grep must not descend into or scan the gitignored file")
 
-                let readOutput = try await DiagnosticsProbe.callTool(
-                    tool,
-                    arguments: DiagnosticsProbe.payload([
-                        ("op", "read file"),
-                        ("filePath", root.appendingPathComponent("ignored.txt").path),
-                        ("format", IntegrationWire.plainFormat),
-                    ])
-                )
-                let readResult = try #require(OperationOutput.decode(DecodedReadResult.self, from: readOutput))
-                #expect(readResult.lines == ["secret content"], "an explicit-path read must still read the gitignored file")
-            } catch {
-                await context.stop()
-                throw error
-            }
-            await context.stop()
+            let readOutput = try await DiagnosticsProbe.callTool(
+                tool,
+                arguments: DiagnosticsProbe.payload([
+                    ("op", "read file"),
+                    ("filePath", root.appendingPathComponent("ignored.txt").path),
+                    ("format", IntegrationWire.plainFormat),
+                ])
+            )
+            let readResult = try #require(OperationOutput.decode(DecodedReadResult.self, from: readOutput))
+            #expect(readResult.lines == ["secret content"], "an explicit-path read must still read the gitignored file")
         }
     }
 
@@ -186,78 +170,62 @@ struct CrossOpFlowTests {
     /// Parallel reads overlapping one edit each see a whole (never partial) file,
     /// and the edit's final bytes land — the atomic write is never observed torn.
     @Test func parallelReadsDuringAnEditNeverSeeATornFile() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "CrossOpParallelReads") { root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpParallelReads") { tool, _, root in
             let fileURL = root.appendingPathComponent("concurrent.txt")
             try IsolatedWorkspace.write("start\n", to: fileURL)
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
-                let readArguments = DiagnosticsProbe.payload([
-                    ("op", "read file"),
-                    ("filePath", fileURL.path),
-                    ("format", IntegrationWire.plainFormat),
-                ])
-                let editArguments = DiagnosticsProbe.payload([
-                    ("op", "edit file"),
-                    ("filePath", fileURL.path),
-                    ("find", ["start"]),
-                    ("replace", ["finished"]),
-                ])
+            let readArguments = DiagnosticsProbe.payload([
+                ("op", "read file"),
+                ("filePath", fileURL.path),
+                ("format", IntegrationWire.plainFormat),
+            ])
+            let editArguments = DiagnosticsProbe.payload([
+                ("op", "edit file"),
+                ("filePath", fileURL.path),
+                ("find", ["start"]),
+                ("replace", ["finished"]),
+            ])
 
-                // The edit runs concurrently with the reads.
-                async let editOutput: String = DiagnosticsProbe.callTool(tool, arguments: editArguments)
-                var readLines: [[String]] = []
-                await withTaskGroup(of: String?.self) { group in
-                    for _ in 0 ..< Self.concurrentReadCount {
-                        group.addTask { try? await DiagnosticsProbe.callTool(tool, arguments: readArguments) }
-                    }
-                    for await output in group {
-                        if let output, let read = OperationOutput.decode(DecodedReadResult.self, from: output) {
-                            readLines.append(read.lines)
-                        }
+            // The edit runs concurrently with the reads.
+            async let editOutput: String = DiagnosticsProbe.callTool(tool, arguments: editArguments)
+            var readLines: [[String]] = []
+            await withTaskGroup(of: String?.self) { group in
+                for _ in 0 ..< Self.concurrentReadCount {
+                    group.addTask { try? await DiagnosticsProbe.callTool(tool, arguments: readArguments) }
+                }
+                for await output in group {
+                    if let output, let read = OperationOutput.decode(DecodedReadResult.self, from: output) {
+                        readLines.append(read.lines)
                     }
                 }
-                _ = try await editOutput
-
-                #expect(readLines.count == Self.concurrentReadCount, "every concurrent read should have produced a result")
-                for lines in readLines {
-                    #expect(lines == ["start"] || lines == ["finished"], "a concurrent read observed a torn file: \(lines)")
-                }
-                let finalContent = try String(contentsOf: fileURL, encoding: .utf8)
-                #expect(finalContent == "finished\n", "the edit's final bytes must land intact")
-            } catch {
-                await context.stop()
-                throw error
             }
-            await context.stop()
+            _ = try await editOutput
+
+            #expect(readLines.count == Self.concurrentReadCount, "every concurrent read should have produced a result")
+            for lines in readLines {
+                #expect(lines == ["start"] || lines == ["finished"], "a concurrent read observed a torn file: \(lines)")
+            }
+            let finalContent = try String(contentsOf: fileURL, encoding: .utf8)
+            #expect(finalContent == "finished\n", "the edit's final bytes must land intact")
         }
     }
 
     /// Concurrent edits to distinct files each land their own final bytes with no
     /// cross-contamination.
     @Test func concurrentEditsToDistinctFilesEachLandCleanly() async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: "CrossOpConcurrentEdits") { root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpConcurrentEdits") { tool, _, root in
             let fileA = root.appendingPathComponent("a.txt")
             let fileB = root.appendingPathComponent("b.txt")
             try IsolatedWorkspace.write("a-original\n", to: fileA)
             try IsolatedWorkspace.write("b-original\n", to: fileB)
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
-                async let editA: DecodedEditResult? = callEdit(tool, path: fileA.path, find: ["a-original"], replace: ["a-edited"])
-                async let editB: DecodedEditResult? = callEdit(tool, path: fileB.path, find: ["b-original"], replace: ["b-edited"])
-                let resultA = try await editA
-                let resultB = try await editB
+            async let editA: DecodedEditResult? = callEdit(tool, path: fileA.path, find: ["a-original"], replace: ["a-edited"])
+            async let editB: DecodedEditResult? = callEdit(tool, path: fileB.path, find: ["b-original"], replace: ["b-edited"])
+            let resultA = try await editA
+            let resultB = try await editB
 
-                #expect(resultA?.status == IntegrationWire.applied, "edit A should apply")
-                #expect(resultB?.status == IntegrationWire.applied, "edit B should apply")
-                #expect(try String(contentsOf: fileA, encoding: .utf8) == "a-edited\n", "file A must hold its own edit")
-                #expect(try String(contentsOf: fileB, encoding: .utf8) == "b-edited\n", "file B must hold its own edit")
-            } catch {
-                await context.stop()
-                throw error
-            }
-            await context.stop()
+            #expect(resultA?.status == IntegrationWire.applied, "edit A should apply")
+            #expect(resultB?.status == IntegrationWire.applied, "edit B should apply")
+            #expect(try String(contentsOf: fileA, encoding: .utf8) == "a-edited\n", "file A must hold its own edit")
+            #expect(try String(contentsOf: fileB, encoding: .utf8) == "b-edited\n", "file B must hold its own edit")
         }
     }
 
@@ -265,7 +233,7 @@ struct CrossOpFlowTests {
 
     /// A CRLF file keeps every carriage-return/line-feed terminator across an edit.
     @Test func carriageReturnLineFeedIsPreservedAcrossAnEdit() async throws {
-        try await withByteFixture(named: "CrossOpCRLF") { tool, root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpCRLF") { tool, _, root in
             let fileURL = root.appendingPathComponent("crlf.txt")
             let original = Data("line one\r\nline two\r\nline three\r\n".utf8)
             try IntegrationFixtures.writeBytes(original, to: fileURL)
@@ -280,7 +248,7 @@ struct CrossOpFlowTests {
 
     /// A UTF-8 byte-order-mark file keeps its mark byte-for-byte across an edit.
     @Test func byteOrderMarkIsPreservedAcrossAnEdit() async throws {
-        try await withByteFixture(named: "CrossOpBOM") { tool, root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpBOM") { tool, _, root in
             let fileURL = root.appendingPathComponent("bom.txt")
             let original = IntegrationFixtures.utf8ByteOrderMark + Data("alpha\nbeta\ngamma\n".utf8)
             try IntegrationFixtures.writeBytes(original, to: fileURL)
@@ -295,7 +263,7 @@ struct CrossOpFlowTests {
 
     /// An executable script keeps its `0o755` permission bits across an edit.
     @Test func executablePermissionIsPreservedAcrossAnEdit() async throws {
-        try await withByteFixture(named: "CrossOpExecutable") { tool, root in
+        try await FusedToolWorkspace.withFusedTool(named: "CrossOpExecutable") { tool, _, root in
             let fileURL = root.appendingPathComponent("script.sh")
             try IntegrationFixtures.writeBytes(Data("#!/bin/sh\necho old\n".utf8), to: fileURL)
             try IntegrationFixtures.makeExecutable(at: fileURL)
@@ -309,30 +277,6 @@ struct CrossOpFlowTests {
     }
 
     // MARK: - Dispatch helpers
-
-    /// Runs `body` against a fused tool over a fresh isolated workspace, tearing
-    /// the context down on every exit path.
-    ///
-    /// - Parameters:
-    ///   - name: a human-readable prefix identifying the workspace on disk.
-    ///   - body: the work to run against the fused tool and the workspace root.
-    /// - Throws: rethrows whatever scaffolding, tool construction, or `body` throws.
-    private func withByteFixture(
-        named name: String,
-        _ body: (FusedFilesTool, URL) async throws -> Void
-    ) async throws {
-        try await IsolatedWorkspace.withIsolatedWorkspace(named: name) { root in
-            let context = FileContext(root: root)
-            do {
-                let tool = try FileTool.make(context: context)
-                try await body(tool, root)
-            } catch {
-                await context.stop()
-                throw error
-            }
-            await context.stop()
-        }
-    }
 
     /// Dispatches a `write file` and returns its JSON output.
     private func callWrite(_ tool: FusedFilesTool, path: String, content: String) async throws -> String {
