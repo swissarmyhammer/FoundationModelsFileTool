@@ -204,12 +204,8 @@ public enum EditMatch {
     /// win, and the trailing ``Rung/fuzzy`` rung always returns a verdict.
     private static let ladder: [LadderRung] = [
         LadderRung(rung: .exact, locate: locateExact),
-        LadderRung(rung: .normalized, locate: { contentBytes, find, rung in
-            locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: normalize)
-        }),
-        LadderRung(rung: .unicode, locate: { contentBytes, find, rung in
-            locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: unicodeNormalize)
-        }),
+        LadderRung(rung: .normalized, locate: locateNormalized),
+        LadderRung(rung: .unicode, locate: locateUnicode),
         LadderRung(rung: .anchor, locate: locateAnchor),
         LadderRung(rung: .fuzzy, locate: locateFuzzy),
     ]
@@ -303,7 +299,38 @@ public enum EditMatch {
 
     // MARK: Rungs 2 & 3 — normalized and unicode line blocks
 
-    /// Rungs 2 & 3 — whole-line-block match under a supplied line normalizer; `nil` to descend.
+    /// Rung 2 — whole-line-block match under ``normalize(_:)``; `nil` to descend.
+    ///
+    /// The ladder entry point for the ``Rung/normalized`` rung: runs the shared
+    /// ``locateLineBlock(contentBytes:find:rung:lineNormalizer:)`` machinery with
+    /// the plain whitespace ``normalize(_:)`` line normalizer.
+    ///
+    /// - Parameters:
+    ///   - contentBytes: the original content's UTF-8 bytes.
+    ///   - find: the description to locate.
+    ///   - rung: the rung tag to stamp onto a match.
+    /// - Returns: a verdict, or `nil` to descend to the next rung.
+    private static func locateNormalized(contentBytes: [UInt8], find: String, rung: Rung) -> MatchResult? {
+        locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: normalize)
+    }
+
+    /// Rung 3 — whole-line-block match under ``unicodeNormalize(_:)``; `nil` to descend.
+    ///
+    /// The ladder entry point for the ``Rung/unicode`` rung: runs the shared
+    /// ``locateLineBlock(contentBytes:find:rung:lineNormalizer:)`` machinery with
+    /// the ``unicodeNormalize(_:)`` line normalizer, which folds confusable
+    /// typographic punctuation to ASCII before the whitespace trim.
+    ///
+    /// - Parameters:
+    ///   - contentBytes: the original content's UTF-8 bytes.
+    ///   - find: the description to locate.
+    ///   - rung: the rung tag to stamp onto a match.
+    /// - Returns: a verdict, or `nil` to descend to the next rung.
+    private static func locateUnicode(contentBytes: [UInt8], find: String, rung: Rung) -> MatchResult? {
+        locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: unicodeNormalize)
+    }
+
+    /// The shared window-scan for rungs 2 & 3 — whole-line-block match under a supplied line normalizer; `nil` to descend.
     ///
     /// The shared window-scan machinery for both the ``Rung/normalized`` rung
     /// (line normalizer ``normalize(_:)``) and the ``Rung/unicode`` rung (line
