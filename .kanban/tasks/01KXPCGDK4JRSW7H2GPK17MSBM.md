@@ -17,8 +17,8 @@ comments:
 
     Both refactors behavior-preserving; existing tests are the regression guard (decode round-trip cases; PathGuard `.contains("non-existent")` for both edit and delete). Filtered `swift test --filter "PathGuardTests|AtomicWriterTests"`: 48 tests, 2 suites, green. Full `swift test`: 317 tests/20 suites + 26 tests/7 suites, exit 0 (only warning is the pre-existing mlx-swift bundle warning, unrelated). Both findings flipped to [x]. Task left in doing for review. Package.resolved untouched.
   timestamp: 2026-07-17T08:32:04.646015+00:00
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9680'
 title: 'Patch substrate: PathGuard `.delete` access kind + AtomicWriter staged multi-file commit'
 ---
 ## What

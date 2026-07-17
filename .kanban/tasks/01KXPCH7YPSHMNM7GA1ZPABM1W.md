@@ -6,11 +6,40 @@ comments:
   id: 01kxqhq3e4dxe2c1yqy0fak2kw
   text: 'Note from PatchParser (^9davh0r) implementation: the parser deliberately does NOT detect an in-patch conflict between a `*** Move to:` destination and another section''s path (e.g. rename a→b in one section + Add/Update/Delete b in another). Its duplicate-path rule is scoped to header paths only, because rejecting move-destination collisions at parse time would falsely reject legal filename swaps/rotations (a→b, c→a). Cross-path conflict detection needs apply-order semantics — consider handling it here in PatchEngine''s phase-1 compute (where paths are validated and the all-or-nothing set is built), so two operations targeting the same final path abort the patch cleanly.'
   timestamp: 2026-07-17T08:05:04.580155+00:00
+- actor: claude-code
+  id: 01kxqm1amfh6hqgw6kp69zz768
+  text: |-
+    Picked up. Research done: read DESIGN_NOTES, PatchParser (Hunk: addFile/deleteFile/updateFile(path,movePath,pairs)), EditEngine (normalize/resolve/apply→BatchOutcome), AtomicWriter (stage→StagedWrite.commit/discard, decode/encode/detectLineEnding), PathGuard (.write/.edit/.delete), EditFile op (analog for read→decode→EditEngine.apply→encode→write→hash), Hashline.wholeFileHash.
+
+    Design: PatchEngine caseless enum, static apply([Hunk], using: PathGuard) -> Result<[FileOutcome], Failure>. Phase 1 computeChanges (per-hunk validate+read+EditEngine.apply, no writes) building internal [Change]; Phase 2 writeChanges (stage all → discard-all on any stage failure → commit all → unlink move-sources then delete-targets last, skipping any path that is also a write destination so swaps/rotations survive). Failure enum: corrective(String) | unresolved(path, pair, EditEngine.Resolution).
+
+    Cross-file conflict (PatchParser scope note): reject when two hunks PRODUCE the same final path (add.path / update-in-place.path / move.dest), or a produced path is also a delete-target. This rejects move-dest collisions (a→b + Add/Update/Delete b, two moves to c) while ALLOWING legal swaps (a→b, b→a) and rotations (a→b, b→c, c→a) since those produce distinct final paths.
+
+    Decision to flag: task says "deleteFile: read the original bytes" but the bytes are never used (no hash/bytesWritten for a delete) and requiring readability would wrongly reject a deletable-but-unreadable file (.delete permission deliberately does not require read). Will NOT read delete bytes; documenting in code.
+  timestamp: 2026-07-17T08:45:36.783393+00:00
+- actor: claude-code
+  id: 01kxqmfmxv51pvzeppz47rqkh4
+  text: |-
+    Implementation landed (TDD: wrote 13 failing tests first, watched them fail to compile with no PatchEngine, then implemented to green).
+
+    Sources/FileTool/PatchEngine.swift: caseless-enum orchestrator. Public surface: PatchEngine.apply([PatchParser.Hunk], using: PathGuard) -> Result<[FileOutcome], Failure>; FileOutcome(path, action: Action{added/modified/deleted/moved}, movedTo, appliedPairs, bytesWritten?, hash?); Failure{corrective(String) | unresolved(path, EditEngine.Pair, EditEngine.Resolution)}. Internal phase-1 [Change] (uniform struct: optional Write + optional Removal + outcome fields — one struct, not a parallel enum the write phase re-switches on). Reuses PathGuard.validate, AtomicWriter.decode/encode/stage(StagedWrite.commit/discard), EditEngine.apply, Hashline.wholeFileHash — no primitive re-implementation. Removal ordering is data (removalOrder = [.moveSource, .deleteTarget]); performRemovals skips any removal path that is also a write destination, which is what makes swaps/rotations keep content.
+
+    Tests/FileToolTests/PatchEngineTests.swift: 13 @Test cases covering every acceptance criterion + the cross-file conflict scope note (move-dest/add collision, two moves to one dest, delete+move to same path all abort; swap and rotation allowed and content verified swapped/rotated).
+
+    Verification: swift test both bundles green — 330 tests/21 suites (FileToolTests, incl. PatchEngineTests 13/13 and DocCCoverageTests) + 26/7 (integration). Only warning is the pre-existing unrelated mlx-swift bundle build-system warning. Did NOT touch Package.resolved. Running adversarial double-check next.
+  timestamp: 2026-07-17T08:53:26.075150+00:00
+- actor: claude-code
+  id: 01kxqmrxeb2dpcjc7dfsv5jnn7
+  text: |-
+    really-done: green + adversarial double-check returned PASS (no defects). It confirmed: no partial-state leak on any phase-1 or stage failure path; swap/rotation-vs-collision logic sound (phase 1 reads all originals before phase 2 writes, performRemovals skips move-sources that are also write destinations); all six acceptance criteria backed by real assertions (none pass by construction); convention fit (reuse, data-driven, return-don't-throw, docstrings); and the delete-does-not-read-bytes decision is correct (PathGuard.checkDeletePermission already gates existence; requiring read would wrongly reject deletable-but-unreadable files). One informational note (not a defect): true atomicity holds through the stage phase; a commit-phase rename failure can leave earlier writes committed — the standard limit of multi-file rename commits, documented on commit(_:)/removalOrder, and outside this task's acceptance criteria (which scope atomicity to stage failure).
+
+    Task is GREEN and left in doing for /review. Package.resolved untouched.
+  timestamp: 2026-07-17T08:58:29.707944+00:00
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
-position_column: todo
-position_ordinal: '9680'
+position_column: doing
+position_ordinal: '80'
 title: 'PatchEngine: two-phase compute-all-then-write multi-file patch application over EditEngine'
 ---
 ## What
