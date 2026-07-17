@@ -66,17 +66,22 @@ internal enum ChatValidationHarness {
         }
     }
 
+    /// Human-readable phrases describing each reason the system model is
+    /// unavailable, keyed on the reason so ``describe(_:)`` is a single table
+    /// lookup rather than parallel `switch` arms that differ only by their string.
+    private static let unavailabilityDescriptions: [SystemLanguageModel.Availability.UnavailableReason: String] = [
+        .deviceNotEligible: "device not eligible",
+        .appleIntelligenceNotEnabled: "Apple Intelligence not enabled",
+        .modelNotReady: "model not ready",
+    ]
+
     /// A human-readable description of why the model is unavailable.
     ///
     /// - Parameter reason: the unavailability reason reported by the system model.
-    /// - Returns: a short phrase naming the reason.
+    /// - Returns: a short phrase naming the reason, or `"unknown reason"` for any
+    ///   reason absent from ``unavailabilityDescriptions`` (including future cases).
     private static func describe(_ reason: SystemLanguageModel.Availability.UnavailableReason) -> String {
-        switch reason {
-        case .deviceNotEligible: return "device not eligible"
-        case .appleIntelligenceNotEnabled: return "Apple Intelligence not enabled"
-        case .modelNotReady: return "model not ready"
-        @unknown default: return "unknown reason"
-        }
+        unavailabilityDescriptions[reason] ?? "unknown reason"
     }
 
     // MARK: - Validation stages
@@ -250,19 +255,25 @@ private struct Workspace {
     /// The demo source file's path relative to ``root``, as the prompts name it.
     let demoRelativePath: String
 
+    /// The scaffolded package's package and target name, single-sourced so the
+    /// manifest and source paths below stay in lockstep.
+    private static let targetName = "Demo"
+
     /// The demo source file's manifest-relative location.
-    private static let demoPathComponents = ["Sources", "Demo", "Demo.swift"]
+    private static let demoPathComponents = ["Sources", targetName, "\(targetName).swift"]
 
     /// The `Package.swift` a real `sourcekit-lsp` needs to resolve the build graph.
-    private static let manifest = """
+    private static var manifest: String {
+        """
         // swift-tools-version: 6.0
         import PackageDescription
 
         let package = Package(
-            name: "Demo",
-            targets: [.target(name: "Demo")]
+            name: "\(targetName)",
+            targets: [.target(name: "\(targetName)")]
         )
         """
+    }
 
     /// The seed source file: a single function returning an `Int`, so a later
     /// edit to a `String` is a clear type error a real compiler reports.
