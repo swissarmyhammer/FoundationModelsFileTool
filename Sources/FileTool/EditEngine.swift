@@ -621,34 +621,8 @@ public enum EditEngine {
     /// - Returns: the occurrence ranges in order; empty when `needle` is empty or longer than `haystack`.
     private static func literalByteRanges(of needle: String, in haystack: String) -> [Range<Int>] {
         let needleBytes = Array(needle.utf8)
-        let haystackBytes = Array(haystack.utf8)
-        guard !needleBytes.isEmpty, needleBytes.count <= haystackBytes.count else { return [] }
-        var ranges: [Range<Int>] = []
-        var index = 0
-        let lastStart = haystackBytes.count - needleBytes.count
-        while index <= lastStart {
-            if bytesMatch(needleBytes, in: haystackBytes, at: index) {
-                ranges.append(index..<(index + needleBytes.count))
-                index += needleBytes.count
-            } else {
-                index += 1
-            }
-        }
-        return ranges
-    }
-
-    /// Whether `needle` occurs in `haystack` starting at byte offset `index`.
-    ///
-    /// - Parameters:
-    ///   - needle: the byte sequence to match.
-    ///   - haystack: the bytes to match within.
-    ///   - index: the byte offset to test.
-    /// - Returns: `true` when every needle byte equals the haystack byte at the aligned offset.
-    private static func bytesMatch(_ needle: [UInt8], in haystack: [UInt8], at index: Int) -> Bool {
-        for offset in needle.indices where haystack[index + offset] != needle[offset] {
-            return false
-        }
-        return true
+        return EditMatch.byteOffsets(of: needleBytes, in: Array(haystack.utf8))
+            .map { $0..<($0 + needleBytes.count) }
     }
 
     // MARK: Mutation
@@ -859,7 +833,10 @@ public enum EditEngine {
     private static func confusableNote(expected: [String], actual: [String]) -> String? {
         for expectedLine in expected {
             for actualLine in actual where isConfusableDifference(find: expectedLine, file: actualLine) {
-                if let difference = firstConfusableScalar(find: trimmed(expectedLine), file: trimmed(actualLine)) {
+                if let difference = firstConfusableScalar(
+                    find: EditMatch.normalize(expectedLine),
+                    file: EditMatch.normalize(actualLine)
+                ) {
                     return confusableNoteMessage(fileScalar: difference.file, findScalar: difference.find)
                 }
             }
@@ -880,23 +857,8 @@ public enum EditEngine {
     ///   - file: the current text's line.
     /// - Returns: `true` when only confusable folding closes the gap between the lines.
     private static func isConfusableDifference(find: String, file: String) -> Bool {
-        trimmed(find) != trimmed(file) && foldedForComparison(find) == foldedForComparison(file)
-    }
-
-    /// Fold confusables and trim horizontal whitespace, matching the unicode rung's line canonicalization.
-    ///
-    /// - Parameter line: the line to canonicalize.
-    /// - Returns: the confusable-folded, whitespace-trimmed line.
-    private static func foldedForComparison(_ line: String) -> String {
-        trimmed(EditMatch.foldConfusables(line))
-    }
-
-    /// Trim leading and trailing horizontal whitespace, matching the recovery ladder's line normalization.
-    ///
-    /// - Parameter line: the line to trim.
-    /// - Returns: the line with ``horizontalWhitespace`` trimmed from both ends.
-    private static func trimmed(_ line: String) -> String {
-        line.trimmingCharacters(in: horizontalWhitespace)
+        EditMatch.normalize(find) != EditMatch.normalize(file)
+            && EditMatch.unicodeNormalize(find) == EditMatch.unicodeNormalize(file)
     }
 
     /// The first aligned scalar position where two trimmed lines diverge by a genuine confusable pair, or `nil`.
@@ -1039,8 +1001,7 @@ public enum EditEngine {
     /// - Returns: the count of newlines before the offset, plus one.
     private static func lineNumber(ofByteOffset offset: Int, in content: String) -> Int {
         let bytes = Array(content.utf8)
-        let end = min(offset, bytes.count)
-        return bytes[0..<end].reduce(1) { count, byte in count + (byte == newlineByte ? 1 : 0) }
+        return EditMatch.lineNumber(in: bytes, at: min(offset, bytes.count))
     }
 
     // MARK: Corrective messages
@@ -1092,16 +1053,6 @@ public enum EditEngine {
 
     /// The 1-based number of the first occurrence, used as the base for occurrence numbering and selection.
     private static let firstOccurrence = 1
-
-    /// The UTF-8 byte for a line feed (`\n`).
-    private static let newlineByte: UInt8 = 0x0A
-
-    /// The horizontal whitespace trimmed before a confusable line comparison — space, tab, carriage return.
-    ///
-    /// Matches the character set the recovery ladder's line normalization trims,
-    /// so ``foldedForComparison(_:)`` deems a line pair confusable-equal on the
-    /// same terms the ``EditMatch/Rung/unicode`` rung uses.
-    private static let horizontalWhitespace = CharacterSet(charactersIn: " \t\r")
 
     /// The delimiter separating a hashline anchor's `N:HH` head from its optional `|text` suffix.
     ///

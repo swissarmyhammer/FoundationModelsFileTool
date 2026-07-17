@@ -274,7 +274,10 @@ public enum EditMatch {
     ///   - haystack: the bytes to search within.
     /// - Returns: the ascending byte offsets of each non-overlapping occurrence;
     ///   empty when `needle` is empty or longer than `haystack`.
-    private static func byteOffsets(of needle: [UInt8], in haystack: [UInt8]) -> [Int] {
+    ///
+    /// Visible to ``EditEngine`` (same module) so its literal search shares this
+    /// one byte-search implementation rather than duplicating the scan loop.
+    static func byteOffsets(of needle: [UInt8], in haystack: [UInt8]) -> [Int] {
         guard !needle.isEmpty, needle.count <= haystack.count else { return [] }
         var offsets: [Int] = []
         var index = 0
@@ -498,7 +501,10 @@ public enum EditMatch {
     ///
     /// - Parameter text: the line text to normalize.
     /// - Returns: the trimmed text.
-    private static func normalize(_ text: String) -> String {
+    ///
+    /// Visible to ``EditEngine`` (same module) so its near-miss diagnostic trims
+    /// lines on exactly the ladder's terms rather than duplicating the trim.
+    static func normalize(_ text: String) -> String {
         text.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))
     }
 
@@ -523,7 +529,10 @@ public enum EditMatch {
     ///
     /// - Parameter text: the line text to fold and normalize.
     /// - Returns: the confusable-folded, whitespace-trimmed text.
-    private static func unicodeNormalize(_ text: String) -> String {
+    ///
+    /// Visible to ``EditEngine`` (same module) so its near-miss confusable
+    /// diagnostic folds and trims on exactly the unicode rung's terms.
+    static func unicodeNormalize(_ text: String) -> String {
         normalize(foldConfusables(text))
     }
 
@@ -594,7 +603,10 @@ public enum EditMatch {
     }
 
     /// The 1-based line number of the byte at `offset` (newlines before it, plus one).
-    private static func lineNumber(in contentBytes: [UInt8], at offset: Int) -> Int {
+    ///
+    /// Visible to ``EditEngine`` (same module) so its byte-offset-to-line
+    /// mapping shares this one newline count rather than duplicating it.
+    static func lineNumber(in contentBytes: [UInt8], at offset: Int) -> Int {
         contentBytes[0..<offset].reduce(1) { count, byte in count + (byte == newlineByte ? 1 : 0) }
     }
 
