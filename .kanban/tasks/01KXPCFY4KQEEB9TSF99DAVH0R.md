@@ -1,8 +1,36 @@
 ---
 assignees:
 - claude-code
-position_column: todo
-position_ordinal: '9480'
+comments:
+- actor: claude-code
+  id: 01kxqha72v47z98v11fgy2v5sx
+  text: |-
+    Implemented `Sources/FileTool/PatchParser.swift` (pure, IO-free) + `Tests/FileToolTests/PatchParserTests.swift` (21 cases), TDD red→green.
+
+    Design:
+    - `PatchParser` enum with `public typealias Pair = (find: String, replace: String)` (tuple, per spec) and `public enum Hunk { addFile/deleteFile/updateFile }`. `Hunk: Sendable` + hand-written `Equatable` (tuple pairs compared positionally, since tuples can't synthesize Equatable).
+    - `ParseFailure` is a top-level `Error, Equatable, Sendable, CustomStringConvertible` struct carrying `message`+`line`, mirroring the top-level `PathViolation` return-don't-throw convention (NOT nested in PatchParser).
+    - Data-driven markers: `exactMarkers` table (Begin/End/Find/Replace) + `pathMarkers` table (Add/Update/Delete/Move → path). One `classify(_:)` trims then classifies as `.marker/.unknownMarker/.content`. `@Sendable` on the pathMarkers closure to satisfy Swift 6.2 strict concurrency.
+    - Private `Parser` struct cursor (lines, exclusive `end`=End index, seenPaths, index); `parseSections`→`parseSection`→`parseUpdate`→`parsePair`→`consumeBody`. Bodies run verbatim to the next marker; Add strips one leading `+` and joins with `\n`+trailing newline (empty body ⇒ "" not "\n"); Find/Replace joined with `\n`, no trailing newline (hashline passes through byte-identical).
+    - All 6 error rules produce ParseFailure with 1-based line numbers; distinctive substrings ("preceded" vs "followed") keep the two Find/Replace errors assertable.
+
+    Verification: `swift test` full suite green — 306 unit tests / 20 suites + 26 integration / 7 suites, zero failures, no new warnings. Left in doing for review.
+  timestamp: 2026-07-17T07:58:02.331241+00:00
+- actor: claude-code
+  id: 01kxqhpyrrge0gg2jd1c944kcw
+  text: |-
+    Adversarial double-check ran (advisory gate). Verdict REVISE with 3 edge-case findings; it confirmed the written spec + all 6 Acceptance Criteria are fully satisfied and the suite is green. Proceeding past all three with justification (really-done permits fix-or-justify), because each proposed fix regresses correctness:
+
+    1. Move destination exempt from duplicate-path detection — INTENTIONAL. Spec scopes the rule to "the same path appearing in two sections" (section = header path); the parser is "deliberately dumb". Recording move destinations in seenPaths would falsely reject legal filename swaps/rotations (rename a→b AND c→a — both legal since a is freed before reuse). Cross-path conflict analysis needs apply-order semantics, which live in PatchEngine (^zpabm1w), not the parser. Left a note on that card.
+
+    2. Add body absorbs blank/non-`+` lines — INTENTIONAL (forgiving). The greedy "run to next marker" model produces the likely-intended file when a model forgets a leading `+` on an interior blank line (empty content line). The suggested "consume only `+`-lines" fix would REJECT such reasonable model output (e.g. `+l1`\n\n`+l3`), contradicting the tools' forgiving/return-don't-throw philosophy and the exhaustively-enumerated error list ("Errors (all ...)"). The only downside — a trailing blank separator adds one spurious `\n` — is a minor cosmetic edge not worth the brittleness.
+
+    3. Single-blank-line Find body rejected as empty; the emptiness test is on the joined string. INTENTIONAL and safer: a find joining to "" is genuinely empty and useless (never reaches EditEngine), matching the "empty body" criterion; a find of "\n" (two blank lines) is a real pattern and is accepted. Basing the check on line count instead would let an empty find string through to EditEngine, which is worse.
+
+    No code change; behavior matches spec exactly, suite green (306 unit + 26 integration).
+  timestamp: 2026-07-17T08:04:59.800533+00:00
+position_column: doing
+position_ordinal: '80'
 title: 'PatchParser: parse the `patch files` envelope (Add/Delete/Update/Move with Find/Replace bodies)'
 ---
 ## What

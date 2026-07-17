@@ -1,6 +1,11 @@
 ---
 assignees:
 - claude-code
+comments:
+- actor: claude-code
+  id: 01kxqhq3e4dxe2c1yqy0fak2kw
+  text: 'Note from PatchParser (^9davh0r) implementation: the parser deliberately does NOT detect an in-patch conflict between a `*** Move to:` destination and another section''s path (e.g. rename a→b in one section + Add/Update/Delete b in another). Its duplicate-path rule is scoped to header paths only, because rejecting move-destination collisions at parse time would falsely reject legal filename swaps/rotations (a→b, c→a). Cross-path conflict detection needs apply-order semantics — consider handling it here in PatchEngine''s phase-1 compute (where paths are validated and the all-or-nothing set is built), so two operations targeting the same final path abort the patch cleanly.'
+  timestamp: 2026-07-17T08:05:04.580155+00:00
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
