@@ -97,16 +97,26 @@ public struct EditNearMiss: Encodable, Sendable {
     /// The line-level diff of the pair's `find` against the span's current text.
     public let lines: [EditDiffLine]
 
+    /// A diagnostic naming the first confusable-punctuation difference in the diff, or `nil` when there is none.
+    ///
+    /// Surfaced when a diff line pair differs only by Unicode confusable
+    /// punctuation (smart quotes, typographic dashes, exotic spaces), so the
+    /// model reading the diff sees the punctuation is the cause. Nil-omitted from
+    /// the encoding when absent.
+    public let note: String?
+
     /// Creates a near-miss.
     ///
     /// - Parameters:
     ///   - startLine: the 1-based first line of the span.
     ///   - endLine: the 1-based last line of the span.
     ///   - lines: the line-level diff of `find` against the span's current text.
-    public init(startLine: Int, endLine: Int, lines: [EditDiffLine]) {
+    ///   - note: a confusable-punctuation diagnostic, or `nil`; defaults to `nil`.
+    public init(startLine: Int, endLine: Int, lines: [EditDiffLine], note: String? = nil) {
         self.startLine = startLine
         self.endLine = endLine
         self.lines = lines
+        self.note = note
     }
 }
 
@@ -615,7 +625,8 @@ extension EditFile {
         EditNearMiss(
             startLine: nearMiss.startLine,
             endLine: nearMiss.endLine,
-            lines: nearMiss.lines.map { EditDiffLine(change: changeName(for: $0.change), text: $0.text) }
+            lines: nearMiss.lines.map { EditDiffLine(change: changeName(for: $0.change), text: $0.text) },
+            note: nearMiss.note
         )
     }
 

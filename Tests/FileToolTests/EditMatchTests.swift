@@ -86,6 +86,7 @@ import Testing
         switch name {
         case "exact": return .exact
         case "normalized": return .normalized
+        case "unicode": return .unicode
         case "anchor": return .anchor
         case "fuzzy": return .fuzzy
         default: Issue.record("unknown rung \(name)"); return .fuzzy
@@ -271,5 +272,108 @@ import Testing
         }
         #expect(candidates.count == 2)
         #expect(candidates[0].range != candidates[1].range)
+    }
+
+    // MARK: Unicode confusable rung
+
+    /// Assert an ASCII-authored `find` resolves to a unique ``EditMatch/Rung/unicode``
+    /// match at confidence `1.0`, with the returned range indexing the original
+    /// (typographic) bytes.
+    private func assertUnicodeMatch(content: String, find: String, original: String, _ label: String) {
+        guard case .unique(let range, let rung, let confidence) = EditMatch.findMatch(find: find, in: content) else {
+            Issue.record("\(label): expected a unique match")
+            return
+        }
+        #expect(rung == .unicode, "\(label): rung must be unicode")
+        #expect(confidence == 1.0, "\(label): confidence must be 1.0")
+        #expect(
+            originalBytes(of: content, in: range) == original,
+            "\(label): range must index the original typographic bytes"
+        )
+    }
+
+    @Test func unicodeRungFoldsEnDash() {
+        assertUnicodeMatch(content: "value = a\u{2013}b\n", find: "value = a-b", original: "value = a\u{2013}b", "en dash U+2013")
+    }
+
+    @Test func unicodeRungFoldsEmDash() {
+        assertUnicodeMatch(content: "sum = x\u{2014}y\n", find: "sum = x-y", original: "sum = x\u{2014}y", "em dash U+2014")
+    }
+
+    @Test func unicodeRungFoldsMinusSign() {
+        assertUnicodeMatch(content: "delta = m\u{2212}n\n", find: "delta = m-n", original: "delta = m\u{2212}n", "minus sign U+2212")
+    }
+
+    @Test func unicodeRungFoldsSmartSingleQuote() {
+        assertUnicodeMatch(content: "it\u{2019}s ready\n", find: "it's ready", original: "it\u{2019}s ready", "smart single quote U+2019")
+    }
+
+    @Test func unicodeRungFoldsSmartDoubleQuotes() {
+        assertUnicodeMatch(
+            content: "say \u{201C}hi\u{201D} now\n",
+            find: "say \"hi\" now",
+            original: "say \u{201C}hi\u{201D} now",
+            "smart double quotes U+201C/U+201D"
+        )
+    }
+
+    @Test func unicodeRungFoldsNoBreakSpace() {
+        assertUnicodeMatch(content: "a\u{00A0}b\n", find: "a b", original: "a\u{00A0}b", "no-break space U+00A0")
+    }
+
+    @Test func unicodeRungFoldsThinSpace() {
+        assertUnicodeMatch(content: "c\u{2009}d\n", find: "c d", original: "c\u{2009}d", "thin space U+2009")
+    }
+
+    @Test func unicodeRungAmbiguousNeverSilentlyPicksOneFoldedOccurrence() {
+        // Two em-dash occurrences both fold to the ASCII `find`; the outcome must
+        // be Ambiguous with both spans rather than a silent first pick.
+        let content = "p\u{2014}q\nmiddle\np\u{2014}q\n"
+        guard case .ambiguous(let candidates) = EditMatch.findMatch(find: "p-q", in: content) else {
+            Issue.record("expected Ambiguous for two folded occurrences")
+            return
+        }
+        #expect(candidates.count == 2)
+        #expect(candidates[0].range != candidates[1].range)
+    }
+
+    @Test func exactVerbatimOccurrenceWinsOverConfusableVariant() {
+        // A verbatim ASCII occurrence and a confusable em-dash variant both exist;
+        // the exact rung must win before the unicode rung is ever consulted.
+        let content = "a-b\nother\na\u{2014}b\n"
+        guard case .unique(let range, let rung, _) = EditMatch.findMatch(find: "a-b", in: content) else {
+            Issue.record("expected a unique exact match")
+            return
+        }
+        #expect(rung == .exact, "the verbatim occurrence must win at .exact")
+        #expect(originalBytes(of: content, in: range) == "a-b")
+    }
+
+    // MARK: foldConfusables unit cases
+
+    @Test func foldConfusablesIsIdentityOnPureASCII() {
+        let ascii = "plain ASCII text - 'quote' \"dq\" 123\n\t"
+        #expect(EditMatch.foldConfusables(ascii) == ascii)
+    }
+
+    @Test func foldConfusablesMapsDashesToHyphen() {
+        #expect(EditMatch.foldConfusables("\u{2010}\u{2011}\u{2012}\u{2013}\u{2014}\u{2015}\u{2212}") == "-------")
+    }
+
+    @Test func foldConfusablesMapsSingleQuotesToApostrophe() {
+        #expect(EditMatch.foldConfusables("\u{2018}\u{2019}\u{201A}\u{201B}") == "''''")
+    }
+
+    @Test func foldConfusablesMapsDoubleQuotesToQuotationMark() {
+        #expect(EditMatch.foldConfusables("\u{201C}\u{201D}\u{201E}\u{201F}") == "\"\"\"\"")
+    }
+
+    @Test func foldConfusablesMapsExoticSpacesToSpace() {
+        #expect(EditMatch.foldConfusables("\u{00A0}\u{2000}\u{2005}\u{200A}\u{202F}\u{205F}\u{3000}") == "       ")
+    }
+
+    @Test func foldConfusablesLeavesOtherScalarsUnchanged() {
+        let text = "caf\u{00E9} \u{2603} \u{1F600}"
+        #expect(EditMatch.foldConfusables(text) == text)
     }
 }

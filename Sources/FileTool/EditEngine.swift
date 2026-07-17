@@ -251,16 +251,28 @@ public enum EditEngine {
         /// The line-level diff of the pair's `find` against the span's current text.
         public let lines: [DiffLine]
 
+        /// A diagnostic naming the first confusable-punctuation difference in the diff, or `nil` when there is none.
+        ///
+        /// Populated when an expected line and an actual line differ only by
+        /// Unicode confusable punctuation (equal after ``EditMatch/foldConfusables(_:)``
+        /// and a whitespace trim): the note points at the first differing scalar
+        /// with its code point, so a model reading an opaque smart-quote-versus-ASCII
+        /// diff can see the punctuation is the cause. `nil` for a near-miss with no
+        /// confusable-equal line pair.
+        public let note: String?
+
         /// Creates a near-miss.
         ///
         /// - Parameters:
         ///   - startLine: the 1-based first line of the span.
         ///   - endLine: the 1-based last line of the span.
         ///   - lines: the line-level diff of `find` against the span's current text.
-        public init(startLine: Int, endLine: Int, lines: [DiffLine]) {
+        ///   - note: a confusable-punctuation diagnostic, or `nil`; defaults to `nil`.
+        public init(startLine: Int, endLine: Int, lines: [DiffLine], note: String? = nil) {
             self.startLine = startLine
             self.endLine = endLine
             self.lines = lines
+            self.note = note
         }
     }
 
@@ -820,11 +832,128 @@ public enum EditEngine {
     ///   - span: the near-miss span the ladder retained.
     /// - Returns: the near-miss with the span's line range and the line diff.
     private static func nearMiss(for find: String, span: EditMatch.Span) -> NearMiss {
-        NearMiss(
+        let expected = lineTexts(of: find)
+        let actual = lineTexts(of: span.text)
+        return NearMiss(
             startLine: span.startLine,
             endLine: span.endLine,
-            lines: diff(expected: lineTexts(of: find), actual: lineTexts(of: span.text))
+            lines: diff(expected: expected, actual: actual),
+            note: confusableNote(expected: expected, actual: actual)
         )
+    }
+
+    /// The confusable-punctuation note for a near-miss, or `nil` when no line pair differs only by confusables.
+    ///
+    /// Scans the `expected` (the `find`'s) lines against the `actual` (the span's)
+    /// lines for the first pair that is unequal verbatim yet equal after
+    /// ``EditMatch/foldConfusables(_:)`` plus the ladder's whitespace trim, then
+    /// names the first Unicode scalar at which that pair diverges. This is the
+    /// diagnostic facet of the confusable rung: when the ladder still fails
+    /// because *other* lines differ, it explains that a surviving line pair
+    /// differs only by typographic punctuation.
+    ///
+    /// - Parameters:
+    ///   - expected: the `find`'s lines (what the edit expected to be present).
+    ///   - actual: the current text's lines (what is actually present).
+    /// - Returns: the diagnostic note, or `nil` when no confusable-equal pair is found.
+    private static func confusableNote(expected: [String], actual: [String]) -> String? {
+        for expectedLine in expected {
+            for actualLine in actual where isConfusableDifference(find: expectedLine, file: actualLine) {
+                if let difference = firstConfusableScalar(find: trimmed(expectedLine), file: trimmed(actualLine)) {
+                    return confusableNoteMessage(fileScalar: difference.file, findScalar: difference.find)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Whether a line pair differs *only* by confusable punctuation.
+    ///
+    /// True exactly when the two lines are unequal after the ladder's plain
+    /// whitespace trim yet equal once confusables are also folded — so folding is
+    /// what closed the gap. A pair already equal under the whitespace trim alone
+    /// (a pure indentation difference, say) is *not* a confusable difference and
+    /// yields no note, and neither does a pair that stays unequal after folding.
+    ///
+    /// - Parameters:
+    ///   - find: the `find`'s line.
+    ///   - file: the current text's line.
+    /// - Returns: `true` when only confusable folding closes the gap between the lines.
+    private static func isConfusableDifference(find: String, file: String) -> Bool {
+        trimmed(find) != trimmed(file) && foldedForComparison(find) == foldedForComparison(file)
+    }
+
+    /// Fold confusables and trim horizontal whitespace, matching the unicode rung's line canonicalization.
+    ///
+    /// - Parameter line: the line to canonicalize.
+    /// - Returns: the confusable-folded, whitespace-trimmed line.
+    private static func foldedForComparison(_ line: String) -> String {
+        trimmed(EditMatch.foldConfusables(line))
+    }
+
+    /// Trim leading and trailing horizontal whitespace, matching the recovery ladder's line normalization.
+    ///
+    /// - Parameter line: the line to trim.
+    /// - Returns: the line with ``horizontalWhitespace`` trimmed from both ends.
+    private static func trimmed(_ line: String) -> String {
+        line.trimmingCharacters(in: horizontalWhitespace)
+    }
+
+    /// The first aligned scalar position where two trimmed lines diverge by a genuine confusable pair, or `nil`.
+    ///
+    /// Scans the two already-trimmed lines scalar by scalar; at the first
+    /// divergence it reports the pair only when the two scalars fold to the same
+    /// ASCII form — a real confusable relationship. A divergence that is *not* a
+    /// confusable pair (an alignment shift from leading confusable whitespace, for
+    /// instance) yields `nil` rather than a misattributed note.
+    ///
+    /// - Parameters:
+    ///   - find: the `find`'s trimmed line.
+    ///   - file: the current text's trimmed line.
+    /// - Returns: the diverging `(find, file)` confusable scalars, or `nil`.
+    private static func firstConfusableScalar(
+        find: String,
+        file: String
+    ) -> (find: Unicode.Scalar, file: Unicode.Scalar)? {
+        let findScalars = Array(find.unicodeScalars)
+        let fileScalars = Array(file.unicodeScalars)
+        for index in 0..<min(findScalars.count, fileScalars.count) where findScalars[index] != fileScalars[index] {
+            let findScalar = findScalars[index]
+            let fileScalar = fileScalars[index]
+            guard EditMatch.foldConfusables(String(findScalar)) == EditMatch.foldConfusables(String(fileScalar)) else {
+                return nil
+            }
+            return (findScalar, fileScalar)
+        }
+        return nil
+    }
+
+    /// Compose the confusable-punctuation diagnostic naming the file and find scalars with their code points.
+    ///
+    /// - Parameters:
+    ///   - fileScalar: the scalar present in the file (the current text).
+    ///   - findScalar: the scalar present in the `find`.
+    /// - Returns: a message of the form
+    ///   `differs only by Unicode punctuation: the file has 'X' (U+XXXX) where the find has 'Y' (U+YYYY)`.
+    private static func confusableNoteMessage(fileScalar: Unicode.Scalar, findScalar: Unicode.Scalar) -> String {
+        "differs only by Unicode punctuation: the file has \(quoted(fileScalar)) (\(codePoint(fileScalar)))"
+            + " where the find has \(quoted(findScalar)) (\(codePoint(findScalar)))"
+    }
+
+    /// A single scalar wrapped in quotes, using double quotes when the scalar is itself an apostrophe.
+    ///
+    /// - Parameter scalar: the scalar to quote.
+    /// - Returns: the scalar in single quotes, or double quotes when it is `'`.
+    private static func quoted(_ scalar: Unicode.Scalar) -> String {
+        scalar == "'" ? "\"\(scalar)\"" : "'\(scalar)'"
+    }
+
+    /// The `U+XXXX` code-point label of a scalar, zero-padded to at least four hex digits.
+    ///
+    /// - Parameter scalar: the scalar to label.
+    /// - Returns: the uppercase `U+XXXX` code point.
+    private static func codePoint(_ scalar: Unicode.Scalar) -> String {
+        String(format: "U+%04X", scalar.value)
     }
 
     /// A longest-common-subsequence line diff of `expected` against `actual`.
@@ -966,6 +1095,13 @@ public enum EditEngine {
 
     /// The UTF-8 byte for a line feed (`\n`).
     private static let newlineByte: UInt8 = 0x0A
+
+    /// The horizontal whitespace trimmed before a confusable line comparison — space, tab, carriage return.
+    ///
+    /// Matches the character set the recovery ladder's line normalization trims,
+    /// so ``foldedForComparison(_:)`` deems a line pair confusable-equal on the
+    /// same terms the ``EditMatch/Rung/unicode`` rung uses.
+    private static let horizontalWhitespace = CharacterSet(charactersIn: " \t\r")
 
     /// The delimiter separating a hashline anchor's `N:HH` head from its optional `|text` suffix.
     ///

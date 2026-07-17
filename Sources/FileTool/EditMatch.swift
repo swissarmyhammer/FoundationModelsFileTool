@@ -6,24 +6,33 @@ import Foundation
 /// anchor), that string is a *description* of a span, not a byte-exact copy: the
 /// model may have dropped indentation, normalized line endings, or paraphrased
 /// an interior line. ``findMatch(find:in:)`` resolves such a description to a
-/// concrete byte span in the original content by climbing a four-rung ladder and
+/// concrete byte span in the original content by climbing a five-rung ladder and
 /// stopping at the first unique, confident match:
 ///
 /// 1. ``Rung/exact`` — literal substring match.
 /// 2. ``Rung/normalized`` — match after normalizing line endings and trailing
 ///    whitespace, returning the span in the *original* bytes so the caller edits
 ///    the original.
-/// 3. ``Rung/anchor`` — match the unique first and last lines of `find` and span
+/// 3. ``Rung/unicode`` — match after additionally folding confusable typographic
+///    punctuation (smart quotes, en/em dashes, exotic spaces) to their ASCII
+///    forms, so an ASCII-authored `find` resolves against content that carries
+///    typographic punctuation. Fires only after ``Rung/normalized`` has descended.
+/// 4. ``Rung/anchor`` — match the unique first and last lines of `find` and span
 ///    the region between them, tolerating interior drift.
-/// 4. ``Rung/fuzzy`` — similarity-scored match, accepted only when it clears
+/// 5. ``Rung/fuzzy`` — similarity-scored match, accepted only when it clears
 ///    ``fuzzyAcceptThreshold`` and beats the runner-up by at least
 ///    ``fuzzyRunnerUpMargin``. A fuzzy match is never applied silently.
 ///
-/// This is an algorithm-exact port of the Rust `swissarmyhammer-edit-match`
-/// crate; the ladder rungs, thresholds, and outcomes mirror it rung-for-rung so
-/// the Swift and Rust `edit files` tools resolve a drifted `find` to the same
-/// byte span. Parity is pinned by golden vectors generated from the Rust crate
-/// (`Tests/FileToolTests/Fixtures/edit-match-golden.json`).
+/// Rungs 1, 2, 4, and 5 are an algorithm-exact port of the Rust
+/// `swissarmyhammer-edit-match` crate; their rungs, thresholds, and outcomes
+/// mirror it rung-for-rung so the Swift and Rust `edit files` tools resolve a
+/// drifted `find` to the same byte span, and that parity is pinned by golden
+/// vectors generated from the Rust crate
+/// (`Tests/FileToolTests/Fixtures/edit-match-golden.json`). The ``Rung/unicode``
+/// rung is a deliberate extension **beyond** the Rust crate — it ports the
+/// grok/codex `apply_patch` pass-4 confusable matcher. It folds confusables only
+/// and leaves the ported rungs untouched, so the golden vectors remain
+/// byte-identical; flagged here for future upstream parity with the Rust crate.
 ///
 /// All byte ranges returned index the **original** content's UTF-8 bytes, so a
 /// located span preserves the original indentation and line endings even when
@@ -37,6 +46,11 @@ public enum EditMatch {
         case exact
         /// Match after normalizing line endings and trailing whitespace.
         case normalized
+        /// Match after additionally folding confusable typographic punctuation
+        /// (smart quotes, en/em dashes, exotic spaces) to ASCII before the
+        /// whitespace-normalized line comparison. A deliberate extension beyond
+        /// the Rust crate; see the type-level discussion.
+        case unicode
         /// Match keyed on the unique first and last lines of `find`, spanning the
         /// (possibly drifted) interior between them.
         case anchor
@@ -64,7 +78,7 @@ public enum EditMatch {
         ///   should edit.
         /// - `rung`: which rung produced the match.
         /// - `confidence`: confidence in `[0.0, 1.0]` (`1.0` for the exact,
-        ///   normalized, and anchor rungs; the similarity score for the fuzzy rung).
+        ///   normalized, unicode, and anchor rungs; the similarity score for the fuzzy rung).
         case unique(range: Range<Int>, rung: Rung, confidence: Float)
         /// Two or more candidates tied with no confident winner; the caller must
         /// not pick one silently.
@@ -109,8 +123,8 @@ public enum EditMatch {
 
     /// Run the literal-find recovery ladder, returning the first unique confident match.
     ///
-    /// Climbs the ladder (``Rung/exact`` → ``Rung/normalized`` → ``Rung/anchor``
-    /// → ``Rung/fuzzy``) and stops at the first rung that produces a definite
+    /// Climbs the ladder (``Rung/exact`` → ``Rung/normalized`` → ``Rung/unicode``
+    /// → ``Rung/anchor`` → ``Rung/fuzzy``) and stops at the first rung that produces a definite
     /// verdict, so a higher rung is always preferred over a lower one. Pure:
     /// `(find, content)` in, ``MatchResult`` out, no IO.
     ///
@@ -158,6 +172,22 @@ public enum EditMatch {
         return 1 - distance / Float(maxLength)
     }
 
+    /// Fold confusable typographic punctuation to its ASCII equivalent, per Unicode scalar.
+    ///
+    /// Maps each scalar covered by ``confusableFoldings`` (typographic dashes to
+    /// `-`, curly single quotes to `'`, curly double quotes to `"`, and exotic
+    /// spaces to a plain space) to its ASCII form, leaving every other scalar —
+    /// letters, digits, ASCII punctuation, emoji — unchanged. Pure and total; a
+    /// pure-ASCII string is returned identically. Exposed for the ``Rung/unicode``
+    /// rung and for the near-miss confusable diagnostic in the `edit file`
+    /// engine, which names the first confusable difference it finds.
+    ///
+    /// - Parameter text: the text whose confusable scalars to fold.
+    /// - Returns: `text` with every confusable scalar mapped to its ASCII form.
+    public static func foldConfusables(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.unicodeScalars.map { foldedScalar($0) ?? $0 }))
+    }
+
     // MARK: Ladder table
 
     /// One rung of the recovery ladder: a named strategy that either locates a
@@ -174,7 +204,12 @@ public enum EditMatch {
     /// win, and the trailing ``Rung/fuzzy`` rung always returns a verdict.
     private static let ladder: [LadderRung] = [
         LadderRung(rung: .exact, locate: locateExact),
-        LadderRung(rung: .normalized, locate: locateLineBlock),
+        LadderRung(rung: .normalized, locate: { contentBytes, find, rung in
+            locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: normalize)
+        }),
+        LadderRung(rung: .unicode, locate: { contentBytes, find, rung in
+            locateLineBlock(contentBytes: contentBytes, find: find, rung: rung, lineNormalizer: unicodeNormalize)
+        }),
         LadderRung(rung: .anchor, locate: locateAnchor),
         LadderRung(rung: .fuzzy, locate: locateFuzzy),
     ]
@@ -263,28 +298,39 @@ public enum EditMatch {
         return true
     }
 
-    // MARK: Rung 2 — normalized line block
+    // MARK: Rungs 2 & 3 — normalized and unicode line blocks
 
-    /// Rung 2 — whitespace-normalized, whole-line-block match; `nil` to descend.
+    /// Rungs 2 & 3 — whole-line-block match under a supplied line normalizer; `nil` to descend.
     ///
-    /// Normalizes both the content's physical lines and `find`'s lines, then
-    /// locates runs of consecutive content lines whose normalized forms equal
-    /// the normalized `find` lines. The returned span covers the **original**
-    /// bytes from the start of the first matched line to the end of the last, so
-    /// the caller rewrites the original indentation and line endings.
+    /// The shared window-scan machinery for both the ``Rung/normalized`` rung
+    /// (line normalizer ``normalize(_:)``) and the ``Rung/unicode`` rung (line
+    /// normalizer ``unicodeNormalize(_:)``, which folds confusables before
+    /// normalizing). It applies `lineNormalizer` to both the content's physical
+    /// lines and `find`'s lines, then locates runs of consecutive content lines
+    /// whose normalized forms equal the normalized `find` lines. The returned span
+    /// covers the **original** bytes from the start of the first matched line to
+    /// the end of the last, so the caller rewrites the original indentation, line
+    /// endings, and typographic punctuation regardless of which normalizer matched.
     ///
     /// - Parameters:
     ///   - contentBytes: the original content's UTF-8 bytes.
     ///   - find: the description to locate.
     ///   - rung: the rung tag to stamp onto a match.
+    ///   - lineNormalizer: the per-line canonicalization applied to both sides
+    ///     before comparison.
     /// - Returns: a verdict, or `nil` to descend to the next rung.
-    private static func locateLineBlock(contentBytes: [UInt8], find: String, rung: Rung) -> MatchResult? {
+    private static func locateLineBlock(
+        contentBytes: [UInt8],
+        find: String,
+        rung: Rung,
+        lineNormalizer: (String) -> String
+    ) -> MatchResult? {
         let contentLines = physicalLines(in: contentBytes)
-        let findNormalized = trimmingTrailingEmpty(lines(of: find).map(normalize))
+        let findNormalized = trimmingTrailingEmpty(lines(of: find).map(lineNormalizer))
         if findNormalized.isEmpty {
             return nil
         }
-        let contentNormalized = contentLines.map { normalize(text(of: contentBytes, in: $0)) }
+        let contentNormalized = contentLines.map { lineNormalizer(text(of: contentBytes, in: $0)) }
         guard findNormalized.count <= contentNormalized.count else { return nil }
 
         var matchedRanges: [Range<Int>] = []
@@ -322,9 +368,9 @@ public enum EditMatch {
         }
     }
 
-    // MARK: Rung 3 — anchor
+    // MARK: Rung 4 — anchor
 
-    /// Rung 3 — first/last-line anchor match; `nil` to descend.
+    /// Rung 4 — first/last-line anchor match; `nil` to descend.
     ///
     /// Requires `find` to have at least two non-empty anchor lines. The first
     /// normalized line of `find` must occur on exactly one content line, the
@@ -356,9 +402,9 @@ public enum EditMatch {
         return .unique(range: range, rung: rung, confidence: confidentMatchScore)
     }
 
-    // MARK: Rung 4 — fuzzy
+    // MARK: Rung 5 — fuzzy
 
-    /// Rung 4 — fuzzy, similarity-scored match over physical lines.
+    /// Rung 5 — fuzzy, similarity-scored match over physical lines.
     ///
     /// Scores every content line against the normalized `find`, then applies the
     /// threshold and runner-up margin: the best candidate wins only if it clears
@@ -466,6 +512,59 @@ public enum EditMatch {
     /// - Returns: the trimmed lines joined by newlines.
     private static func normalizeMultiline(_ find: String) -> String {
         lines(of: find).map(normalize).joined(separator: "\n")
+    }
+
+    /// Normalize a line for the ``Rung/unicode`` comparison: fold confusables, then trim.
+    ///
+    /// Composes ``foldConfusables(_:)`` with ``normalize(_:)`` so a line's
+    /// typographic punctuation is folded to ASCII before the same whitespace trim
+    /// the ``Rung/normalized`` rung applies. Passed as the line normalizer to
+    /// ``locateLineBlock(contentBytes:find:rung:lineNormalizer:)`` for the unicode rung.
+    ///
+    /// - Parameter text: the line text to fold and normalize.
+    /// - Returns: the confusable-folded, whitespace-trimmed text.
+    private static func unicodeNormalize(_ text: String) -> String {
+        normalize(foldConfusables(text))
+    }
+
+    // MARK: Confusable folding
+
+    /// One confusable-folding rule: scalar-value ranges that all fold to a single ASCII replacement.
+    private struct ConfusableFolding: Sendable {
+        /// The inclusive Unicode scalar-value ranges this rule covers.
+        let scalarRanges: [ClosedRange<UInt32>]
+        /// The ASCII scalar every covered scalar folds to.
+        let replacement: Unicode.Scalar
+    }
+
+    /// The confusable-punctuation fold map as data: scalar ranges → ASCII replacement.
+    ///
+    /// Each entry lists the Unicode scalar-value ranges that fold to one ASCII
+    /// scalar, so ``foldConfusables(_:)`` is a single data-driven pass rather than
+    /// a hand-maintained switch. Covers typographic dashes (`U+2010`–`U+2015`,
+    /// `U+2212`), curly single quotes (`U+2018`–`U+201B`), curly double quotes
+    /// (`U+201C`–`U+201F`), and exotic spaces (`U+00A0`, `U+2000`–`U+200A`,
+    /// `U+202F`, `U+205F`, `U+3000`). Mirrors the grok/codex `apply_patch` pass-4
+    /// confusable set.
+    private static let confusableFoldings: [ConfusableFolding] = [
+        ConfusableFolding(scalarRanges: [0x2010...0x2015, 0x2212...0x2212], replacement: "-"),
+        ConfusableFolding(scalarRanges: [0x2018...0x201B], replacement: "'"),
+        ConfusableFolding(scalarRanges: [0x201C...0x201F], replacement: "\""),
+        ConfusableFolding(
+            scalarRanges: [0x00A0...0x00A0, 0x2000...0x200A, 0x202F...0x202F, 0x205F...0x205F, 0x3000...0x3000],
+            replacement: " "
+        ),
+    ]
+
+    /// The ASCII replacement a scalar folds to, or `nil` when it is not confusable.
+    ///
+    /// - Parameter scalar: the scalar to test against ``confusableFoldings``.
+    /// - Returns: the folded ASCII scalar, or `nil` to leave the scalar unchanged.
+    private static func foldedScalar(_ scalar: Unicode.Scalar) -> Unicode.Scalar? {
+        for folding in confusableFoldings where folding.scalarRanges.contains(where: { $0.contains(scalar.value) }) {
+            return folding.replacement
+        }
+        return nil
     }
 
     /// Strip trailing all-whitespace (normalized-empty) lines from an array.

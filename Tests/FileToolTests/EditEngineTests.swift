@@ -239,6 +239,62 @@ import Testing
         #expect(EditEngine.resolve(pair, in: "abc\n") == .noMatch([]))
     }
 
+    @Test func confusableEqualNearMissCarriesAConfusablePunctuationNote() throws {
+        // The find and the file agree except for a smart apostrophe, plus a find
+        // line with no counterpart — so the ladder fails, yet the near-miss diff's
+        // expected/actual pair is confusable-equal and must be named.
+        let content = "don\u{2019}t stop\n"
+        let pair = EditEngine.Pair(find: "don't stop\nEXTRA_LINE_NOT_PRESENT", replace: "X")
+        guard case .noMatch(let nearMisses) = EditEngine.resolve(pair, in: content) else {
+            Issue.record("expected noMatch")
+            return
+        }
+        let note = try #require(nearMisses.first?.note)
+        #expect(
+            note
+                == "differs only by Unicode punctuation: the file has '\u{2019}' (U+2019) where the find has \"'\" (U+0027)"
+        )
+    }
+
+    @Test func genuinelyDifferentNearMissHasNoConfusableNote() {
+        let content = "the quick brown fox\n"
+        let pair = EditEngine.Pair(find: "the quick red fox", replace: "X")
+        guard case .noMatch(let nearMisses) = EditEngine.resolve(pair, in: content) else {
+            Issue.record("expected noMatch")
+            return
+        }
+        #expect(nearMisses.first?.note == nil)
+    }
+
+    @Test func indentationOnlyNearMissHasNoConfusableNote() {
+        // The near-miss line pair is equal after a plain whitespace trim — only the
+        // find's indentation differs, with no confusable punctuation — so folding is
+        // not load-bearing and no confusable note may be emitted.
+        let content = "alpha\nbeta\n"
+        let pair = EditEngine.Pair(find: "  alpha\nZZZ_UNIQUE", replace: "X")
+        guard case .noMatch(let nearMisses) = EditEngine.resolve(pair, in: content) else {
+            Issue.record("expected noMatch")
+            return
+        }
+        #expect(nearMisses.allSatisfy { $0.note == nil })
+    }
+
+    @Test func indentedConfusableNearMissNamesTheConfusableNotTheIndentation() {
+        // A find line that is both indented and confusable-different from the file
+        // line must name the real confusable scalar, not the leading-whitespace shift.
+        let content = "don\u{2019}t stop\n"
+        let pair = EditEngine.Pair(find: "    don't stop\nZZZ_UNIQUE", replace: "X")
+        guard case .noMatch(let nearMisses) = EditEngine.resolve(pair, in: content) else {
+            Issue.record("expected noMatch")
+            return
+        }
+        let note = nearMisses.compactMap(\.note).first
+        #expect(
+            note
+                == "differs only by Unicode punctuation: the file has '\u{2019}' (U+2019) where the find has \"'\" (U+0027)"
+        )
+    }
+
     // MARK: apply — batch semantics
 
     @Test func batchAppliesPairsSequentially() {

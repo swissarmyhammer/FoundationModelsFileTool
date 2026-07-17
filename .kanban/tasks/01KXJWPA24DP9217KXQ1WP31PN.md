@@ -44,11 +44,15 @@ comments:
   id: 01kxqcbe0t5ehpv4ay4b2wwde1
   text: 'Iteration 3: both findings fixed (test-only). (1) Renamed TestSupport.path(_:isContainedBy:)→path(candidate:isContainedBy:) (containment predicate); updated all sites: TestSupport decl, DocCCoverageScanner.scan, ReadmeSnippets.sourceFileLines, PathContainmentTests (4 asserts + doc); grep confirms zero positional TestSupport.path(x, calls. (2) sibling-rejection parity: README scanner''s guard was in private sourceFileLines w/ non-injectable packageRoot() → extracted injectable-root static ReadmeSnippets.sourceFileLines(relativePath:root:) (mirrors DocCCoverageScanner.scan(directory:root:) design; private wrapper delegates w/ packageRoot(), behavior preserved). New test sourcePathInSiblingSharingRootPrefixIsRejected() builds temp pkg/pkg-evil w/ a REAL readable file.swift in the sibling, asserts sourceFileLines(relativePath:"../pkg-evil/file.swift",root:pkg) throws — exercises the README guard directly, mirrors DocCCoverageTests.scanningSiblingSharingRootPrefixThrows (not a dup of ..-escape or the pure-predicate PathContainmentTests). NON-VACUOUS proven TDD-red: guard bypassed (guard true||…) → real sibling file read succeeded, test failed "error expected but none thrown"; restored → green (only the guard can reject since the file really exists). swift test --filter DocCCoverageTests|ReadmeSnippetTests|PathContainmentTests 14/14 (+1); full 265 FileToolTests + 26 integration = 291 green, 0 failures; double-check PASS. Only 4 Tests/FileToolTests/*.swift changed, no Sources/Package. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-17T06:31:19.322811+00:00
+- actor: claude-code
+  id: 01kxqcqv0dmjjrmz3rswc8256h
+  text: 'DONE. Iteration 3 re-review clean (full 14/0, 0 findings). All findings across 3 sections resolved (2 path-traversal-containment security → 1 label + 1 test-parity → 0). Task moved doing→review→done. Converged in 3 iterations. README (library-style, diagnostics-loop + multi-project front and center, snippet-provenance tested), DESIGN_NOTES (§8 departures 1-8 + nested-repo/overlap + upstream deps), full DocC coverage scanner (0 undocumented public), path-containment guards hardened + shared. Verified-good local commit: 427454b (green 291). Not pushed. Checkpoint commits: cad5b29, 992d2cb, 427454b.'
+  timestamp: 2026-07-17T06:38:05.837165+00:00
 depends_on:
 - 01KXJWNX69AB8Q6PEBEPH5KP3A
 - 01KXKY0YMD58YMNF5X4THRNWZT
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9380'
 title: 'Docs: README, DocC, departures'
 ---
 ## What

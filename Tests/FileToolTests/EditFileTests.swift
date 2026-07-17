@@ -270,6 +270,31 @@ import Testing
         #expect(try Self.readBytes(path) == original, "a near-miss must leave the file byte-identical")
     }
 
+    @Test func nearMissEditSurfacesAConfusablePunctuationNote() async throws {
+        let original = Data("don\u{2019}t stop\n".utf8)
+        let (context, _, path) = try Self.makeContext(seeding: original)
+        let output = try await Self.makeOperation(
+            filePath: path,
+            find: ["don't stop\nEXTRA_LINE_NOT_PRESENT"],
+            replace: ["X"]
+        ).execute(in: context)
+        let result = try #require(output.resultValue)
+
+        #expect(result.status == "nearMiss")
+        let nearMiss = try #require(result.outcomes.first?.nearMisses?.first)
+        #expect(
+            nearMiss.note
+                == "differs only by Unicode punctuation: the file has '\u{2019}' (U+2019) where the find has \"'\" (U+0027)"
+        )
+
+        // The note rides through the Encodable wire projection.
+        let encoded = try JSONEncoder().encode(nearMiss)
+        let json = String(decoding: encoded, as: UTF8.self)
+        #expect(json.contains("U+2019"))
+        #expect(json.contains("U+0027"))
+        #expect(try Self.readBytes(path) == original, "a near-miss must leave the file byte-identical")
+    }
+
     @Test func alreadyAppliedEditIsReportedAndCommitsNothing() async throws {
         let original = Data("world\n".utf8)
         let (context, _, path) = try Self.makeContext(seeding: original)
