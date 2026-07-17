@@ -184,12 +184,16 @@ comments:
   id: 01kxpmtyr7gzzph5kdn9ag5myy
   text: 'Iteration 6: concurrency finding fixed at root. Removed the leaking deinit { Task { await resolver.shutdown() } } ENTIRELY — type now uses the default synchronous deinit (legal, non-leaking). Structured teardown is the sole path: DiagnosticsBridge.stop() (async, pre-existing) → resolver.shutdown() → manager.shutdown() closes every open CodeContext; added FileContext.stop() (async) forwarding to diagnostics.stop() as the owner-facing entry point (FileContext is constructed only by library consumers, so the owner calls stop() before release). DocC on both stop()s + plan.md §4 document that teardown is deliberately explicit because a sync deinit can''t await async shutdown without leaking an unstructured Task. No unstructured-Task leak remains: grep confirms no deinit block; only surviving Task {} is warmUpTask (STORED in the property + awaited by tests = structured, out of scope). Behavior preserved: manager still shuts down on owner stop(); no hang/deadlock; deinit not made async. No test relied on deinit shutdown (existing suite mutates only .txt/.sh non-diagnosable → manager never created). TDD RED (FileContext has no member ''stop'') → GREEN. swift test --filter FileContextTests|DiagnosticsBridgeTests 21/21; full 211 green, double-check PASS. Seam + Package.resolved (91e2b00) untouched. Added FileContextTests.swift. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-16T23:40:22.151060+00:00
+- actor: claude-code
+  id: 01kxpn7z13wze0rj2ggj1yj0jq
+  text: 'DONE. Iteration 6 re-review clean (full 14/0, 0 findings). All review-findings sections resolved. Task moved doing→review→done. Converged in 6 iterations (findings/round: 7→2→3→[3 w/ 2 kept internal-for-testability accepted]→1(security)→1(concurrency)→0; dimensions arg-labels+dup+test-coverage→DRY→access-control+data-driven→path-traversal-SECURITY→deinit-unstructured-Task-CONCURRENCY). Multi-project DiagnosticsBridge wrapping CodeContextManager, per-file routing via DiagnosticsResolving seam (ResolvedDiagnostics? — forced deviation from DiagnosticsReport? accepted by engine), NullEmbedder, gates, session-root path rebase w/ traversal sanitization, error-degradation-never-gates, structured async stop() teardown; wired into Write/Edit results; plan.md §4 rewritten multi-project. Verified-good local commit: 7d25c4e (green 212/212). Not pushed. Checkpoint commits: a17aaf0, 51da1fc, 13c3c77, b708544, fa3e3c9, 7d25c4e. Unblocks downstream (fusion/CLI/demo + integration-suite tasks).'
+  timestamp: 2026-07-16T23:47:28.419761+00:00
 depends_on:
 - 01KXJWG63P8ZHF0M277HKQ2GFF
 - 01KXJWHT8YA35WZ6GGKA76XPF4
 - 01KXJWKBK3F6QH05RQS0EFWS09
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: 8c80
 title: 'DiagnosticsBridge: CodeContextManager per-file routing + FileDiagnostics in write/edit results'
 ---
 ## What

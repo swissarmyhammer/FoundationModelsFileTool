@@ -85,6 +85,10 @@ public enum ReadOutput: Encodable, Sendable {
 @Operation(verb: "read", noun: "file", description: "Read a file's contents, windowed by line and tagged with hashline anchors")
 public struct ReadFile: Sendable {
     /// The path of the file to read.
+    ///
+    /// Aliased to accept the sah/native dialects' `file_path` and
+    /// `absolute_path` spellings in place of the canonical `path`.
+    @OperationParam(aliases: ["file_path", "absolute_path"])
     public var path: String
 
     /// The 1-based line number to start reading from.

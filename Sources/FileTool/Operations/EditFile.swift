@@ -311,12 +311,25 @@ public enum EditOutput: CorrectiveEncodable, Sendable {
 @Operation(verb: "edit", noun: "file", description: "Edit a file's contents by a batch of find/replace pairs, committed atomically with encoding and line-ending preservation")
 public struct EditFile: Sendable {
     /// The path of the file to edit.
+    ///
+    /// Aliased to accept the sah/native-Edit dialects' `path` and
+    /// `absolute_path` spellings; the camelCase/snake_case `file_path` form
+    /// resolves to `filePath` by the resolver's separator normalization.
+    @OperationParam(aliases: ["path", "absolute_path"])
     public var filePath: String
 
     /// The `find` values to locate: one for a scalar edit, several for a parallel-array batch.
+    ///
+    /// Aliased to the native-Edit and sah find-dialect spellings so a payload
+    /// keyed `old_string` (et al.) resolves to this parameter.
+    @OperationParam(aliases: ["old_string", "old", "search", "from", "target", "match"])
     public var find: [String]?
 
     /// The `replace` values: one per `find`, or a single value broadcast across every `find`.
+    ///
+    /// Aliased to the native-Edit and sah replace-dialect spellings so a
+    /// payload keyed `new_string` (et al.) resolves to this parameter.
+    @OperationParam(aliases: ["new_string", "new", "to", "with", "replacement"])
     public var replace: [String]?
 
     /// Whether every occurrence of each `find` is rewritten rather than a single one; absent means the default (`false`).

@@ -20,6 +20,10 @@ public struct GlobFiles: Sendable {
     public var pattern: String
 
     /// The directory to search, or `nil` to search the session root.
+    ///
+    /// Aliased to accept the sah/native dialects' `file_path` and
+    /// `absolute_path` spellings in place of the canonical `path`.
+    @OperationParam(aliases: ["file_path", "absolute_path"])
     public var path: String?
 
     /// Whether matching is case-sensitive; absent means the default (`false`).

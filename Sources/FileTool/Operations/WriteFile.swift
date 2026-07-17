@@ -106,6 +106,11 @@ public enum WriteOutput: Encodable, Sendable {
 @Operation(verb: "write", noun: "file", description: "Write content to a file atomically, returning its freshness token and hashline-tagged content")
 public struct WriteFile: Sendable {
     /// The path of the file to write.
+    ///
+    /// Aliased to accept the sah/native dialects' `path` and `absolute_path`
+    /// spellings; the `file_path` form resolves to `filePath` by the resolver's
+    /// separator normalization.
+    @OperationParam(aliases: ["path", "absolute_path"])
     public var filePath: String
 
     /// The content to write.

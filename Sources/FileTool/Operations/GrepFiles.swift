@@ -20,6 +20,10 @@ public struct GrepFiles: Sendable {
     public var pattern: String
 
     /// The file or directory to search, or `nil` to search the session root.
+    ///
+    /// Aliased to accept the sah/native dialects' `file_path` and
+    /// `absolute_path` spellings in place of the canonical `path`.
+    @OperationParam(aliases: ["file_path", "absolute_path"])
     public var path: String?
 
     /// A filename filter applied to a directory walk, or `nil` for no filter.
