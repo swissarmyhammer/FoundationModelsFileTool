@@ -66,6 +66,25 @@ comments:
 
     Verification: `swift test --filter PatchEngineTests` → 15/15 green; full `swift test` → FileToolTests 332/21 and integration 26/7, all green (only warning is the pre-existing unrelated mlx-swift build-system bundle warning). Package.resolved untouched.
   timestamp: 2026-07-17T09:23:28.400246+00:00
+- actor: claude-code
+  id: 01kxqq1vpvbkc2gczmabfpch7z
+  text: |-
+    Worked the 2026-07-17 04:25 review finding (duplicated Result-switch pattern in computeUpdate, duplicate of the same pattern in computeChanges).
+
+    Form adopted: Swift typed-throws sequencing — `do { let x = try helper(...).get(); ... return .success(...) } catch { return .failure(error) }`. Every helper returns `Result<_, Failure>`, so `.get()` is `throws(Failure)`; when a do-block's only throwing sites all throw the same concrete `Failure`, its inferred thrown type is `Failure`, so the untyped `catch` binds `error: Failure` and `return .failure(error)` re-wraps it verbatim. This is SIMULTANEOUSLY flat (happy path reads top-to-bottom, one `let` per step) and duplication-free (zero repeated switch), and does NOT reintroduce the flatMap/closure pyramid the 04:13 finding removed.
+
+    Sites changed (both in PatchEngine.swift):
+    - `computeUpdate`: the four sequential `switch <helper-Result> { .success bind / .failure return }` blocks -> four flat `let x = try <helper>.get()` lines + single trailing `catch`. Same order (validate .edit -> resolveDestination .write -> decodeSource -> resolveContent), same first-failure short-circuit, same `makeUpdateChange(...)` inputs.
+    - `computeChanges`: the append-variant `switch computeChange(...) { .success append / .failure return }` inside the loop -> `changes.append(try computeChange(...).get())` inside `do`, with the trailing `catch`. NOTE: used a `for` loop rather than `.map`, because `Sequence.map` is untyped `rethrows` (infers `any Error`, which will not type-check against `Result<_, Failure>`); a `for` loop whose only throwing site is `.get()` keeps the inferred thrown type exactly `Failure`. conflictViolation still runs only after all hunks succeed (it is a plain `return` inside the do, not a throw).
+
+    Left intentionally: the `switch EditEngine.apply(...)` in resolveContent switches on the engine's `.applied`/`.failed` outcome enum, not `Result<_, Failure>` — it is not the flagged pattern and cannot be collapsed by `.get()`.
+
+    Behavior/precedence IDENTICAL: same evaluation order, same first-failure short-circuit, same Failure values propagated verbatim (no rewrapping/message change), same success outcome. Empty hunks still yields `.success([])`.
+
+    Verification: `swift test --filter PatchEngineTests` -> 15/15 green; full `swift test` -> FileToolTests 332/21 and integration 26/7, all green. Package.resolved untouched. Adversarial double-check returned PASS across all six checked dimensions (order, short-circuit, verbatim propagation, success outcome, no new duplication/no pyramid, resolveContent switch correctly left alone).
+
+    Task GREEN, left in doing for /review.
+  timestamp: 2026-07-17T09:38:19.995785+00:00
 depends_on:
 - 01KXPCFY4KQEEB9TSF99DAVH0R
 - 01KXPCGDK4JRSW7H2GPK17MSBM
@@ -115,3 +134,7 @@ Keep the engine free of `@Operation`/wire types — it returns engine-level valu
 ## Review Findings (2026-07-17 04:13)
 
 - [x] `Sources/FileTool/PatchEngine.swift:361` — Function computeUpdate has 4 levels of nested Result closures (validate().flatMap{}.flatMap{}.flatMap{}.map{}) forming a deep closure pyramid, making control flow hard to follow despite each layer being simple. Flatten the pyramid by extracting intermediate Result computations into named variables or helper functions that can be composed more linearly.
+
+## Review Findings (2026-07-17 04:25)
+
+- [x] `Sources/FileTool/PatchEngine.swift:256` — Identical Result switch pattern; duplicate of line 244. Extract shared helper (see line 244).

@@ -212,17 +212,18 @@ public enum PatchEngine {
         _ hunks: [PatchParser.Hunk],
         using pathGuard: PathGuard
     ) -> Result<[Change], Failure> {
-        var changes: [Change] = []
-        for hunk in hunks {
-            switch computeChange(hunk, using: pathGuard) {
-            case .success(let change): changes.append(change)
-            case .failure(let failure): return .failure(failure)
+        do {
+            var changes: [Change] = []
+            for hunk in hunks {
+                changes.append(try computeChange(hunk, using: pathGuard).get())
             }
+            if let conflict = conflictViolation(in: changes) {
+                return .failure(.corrective(conflict))
+            }
+            return .success(changes)
+        } catch {
+            return .failure(error)
         }
-        if let conflict = conflictViolation(in: changes) {
-            return .failure(.corrective(conflict))
-        }
-        return .success(changes)
     }
 
     /// Compute the change for one hunk, validating its path and resolving its bytes.
@@ -329,38 +330,22 @@ public enum PatchEngine {
         pairs: [PatchParser.Pair],
         using pathGuard: PathGuard
     ) -> Result<Change, Failure> {
-        let sourceURL: URL
-        switch validate(path, for: .edit, using: pathGuard) {
-        case .success(let url): sourceURL = url
-        case .failure(let failure): return .failure(failure)
-        }
-
-        let destinationURL: URL?
-        switch resolveDestination(movePath, using: pathGuard) {
-        case .success(let url): destinationURL = url
-        case .failure(let failure): return .failure(failure)
-        }
-
-        let decoded: AtomicWriter.DecodedText
-        switch decodeSource(sourceURL) {
-        case .success(let value): decoded = value
-        case .failure(let failure): return .failure(failure)
-        }
-
-        let resolved: ResolvedContent
-        switch resolveContent(pairs, in: decoded.text, path: sourceURL.path) {
-        case .success(let value): resolved = value
-        case .failure(let failure): return .failure(failure)
-        }
-
-        return .success(
-            makeUpdateChange(
-                sourceURL: sourceURL,
-                destinationURL: destinationURL,
-                decoded: decoded,
-                resolved: resolved
+        do {
+            let sourceURL = try validate(path, for: .edit, using: pathGuard).get()
+            let destinationURL = try resolveDestination(movePath, using: pathGuard).get()
+            let decoded = try decodeSource(sourceURL).get()
+            let resolved = try resolveContent(pairs, in: decoded.text, path: sourceURL.path).get()
+            return .success(
+                makeUpdateChange(
+                    sourceURL: sourceURL,
+                    destinationURL: destinationURL,
+                    decoded: decoded,
+                    resolved: resolved
+                )
             )
-        )
+        } catch {
+            return .failure(error)
+        }
     }
 
     /// Resolve an optional move destination, validating it for `.write`.
