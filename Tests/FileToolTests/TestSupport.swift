@@ -41,7 +41,7 @@ enum TestSupport {
     ///   - candidate: the path to test for containment.
     ///   - root: the directory `candidate` must stay within.
     /// - Returns: `true` iff `candidate` is `root` or a descendant of it.
-    static func path(_ candidate: URL, isContainedBy root: URL) -> Bool {
+    static func path(candidate: URL, isContainedBy root: URL) -> Bool {
         let rootPath = root.standardizedFileURL.path
         let candidatePath = candidate.standardizedFileURL.path
         return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")

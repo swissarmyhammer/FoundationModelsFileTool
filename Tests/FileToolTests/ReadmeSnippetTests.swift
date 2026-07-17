@@ -75,25 +75,32 @@ struct ReadmeSnippetTests {
         }
     }
 
+    @Test("a doc-snippet source path in a sibling directory that merely shares the root's path prefix is rejected")
+    func sourcePathInSiblingSharingRootPrefixIsRejected() throws {
+        let base = TestSupport.makeTemporaryDirectory(named: "ReadmeSnippetContainment")
+        let root = base.appendingPathComponent("pkg", isDirectory: true)
+        let sibling = base.appendingPathComponent("pkg-evil", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        // A readable file genuinely exists in the sibling, so without the
+        // containment guard the read would succeed: this proves the guard —
+        // not a missing file — is what rejects the sibling-prefix path.
+        try "let evil = 0\n".write(
+            to: sibling.appendingPathComponent("file.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+        #expect(throws: (any Error).self) {
+            _ = try ReadmeSnippets.sourceFileLines(relativePath: "../pkg-evil/file.swift", root: root)
+        }
+    }
+
     private func fileContents(relativePath: String) throws -> String {
         try String(contentsOf: packageRoot().appendingPathComponent(relativePath), encoding: .utf8)
     }
 
     private func sourceFileLines(relativePath: String) throws -> [String] {
-        let root = packageRoot()
-        let fileURL = root.appendingPathComponent(relativePath).standardizedFileURL
-        guard TestSupport.path(fileURL, isContainedBy: root) else {
-            throw PathEscapesPackageRoot(path: relativePath)
-        }
-        let contents = try String(contentsOf: fileURL, encoding: .utf8)
-        return contents.components(separatedBy: "\n")
-    }
-
-    /// A source path cited by a README `doc-snippet` marker resolved outside
-    /// the package root — e.g. via a `..` component.
-    private struct PathEscapesPackageRoot: Error, CustomStringConvertible {
-        let path: String
-        var description: String { "'\(path)' resolves outside the package root" }
+        try ReadmeSnippets.sourceFileLines(relativePath: relativePath, root: packageRoot())
     }
 
     /// The package root directory, derived from this file's own path: three
@@ -178,5 +185,39 @@ enum ReadmeSnippets {
             return true
         }
         return false
+    }
+
+    /// Reads the lines of the file `relativePath` cites, guarding that the
+    /// resolved path stays *within* `root` — the root itself or a genuine
+    /// descendant, never a sibling directory that merely shares the root's
+    /// string prefix.
+    ///
+    /// The containment check routes through the shared
+    /// `TestSupport.path(candidate:isContainedBy:)` helper, the same guard the
+    /// DocC-coverage scanner uses. `root` is a parameter (rather than derived
+    /// internally) so the guard can be exercised against a synthetic root/sibling
+    /// pair on disk.
+    ///
+    /// - Parameters:
+    ///   - relativePath: the cited source path, relative to `root`.
+    ///   - root: the package root the resolved path must stay within.
+    /// - Returns: the cited file's lines, split on newlines.
+    /// - Throws: `PathEscapesPackageRoot` if `relativePath` resolves outside
+    ///   `root`; a read error if the file cannot be read.
+    static func sourceFileLines(relativePath: String, root: URL) throws -> [String] {
+        let fileURL = root.appendingPathComponent(relativePath).standardizedFileURL
+        guard TestSupport.path(candidate: fileURL, isContainedBy: root) else {
+            throw PathEscapesPackageRoot(path: relativePath)
+        }
+        let contents = try String(contentsOf: fileURL, encoding: .utf8)
+        return contents.components(separatedBy: "\n")
+    }
+
+    /// A source path cited by a README `doc-snippet` marker that resolved
+    /// outside the package root — via a `..` component, or a sibling directory
+    /// that merely shares the root's string prefix.
+    struct PathEscapesPackageRoot: Error, CustomStringConvertible {
+        let path: String
+        var description: String { "'\(path)' resolves outside the package root" }
     }
 }

@@ -113,7 +113,7 @@ enum DocCCoverageScanner {
     /// - Throws: an error if `directory` escapes `root`, or a file cannot be read.
     static func scan(directory: String, root: URL) throws -> [Violation] {
         let directoryURL = root.appendingPathComponent(directory).standardizedFileURL
-        guard TestSupport.path(directoryURL, isContainedBy: root) else {
+        guard TestSupport.path(candidate: directoryURL, isContainedBy: root) else {
             throw ScanError.pathEscapesPackageRoot(directory)
         }
         let enumerator = FileManager.default.enumerator(at: directoryURL, includingPropertiesForKeys: nil)

@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-/// Pins the containment contract of `TestSupport.path(_:isContainedBy:)`, the
+/// Pins the containment contract of `TestSupport.path(candidate:isContainedBy:)`, the
 /// single guard the doc-snippet and DocC-coverage scanners route their
 /// package-root check through.
 ///
@@ -14,24 +14,24 @@ struct PathContainmentTests {
 
     @Test("the root itself is contained")
     func rootItselfIsContained() {
-        #expect(TestSupport.path(root, isContainedBy: root))
+        #expect(TestSupport.path(candidate: root, isContainedBy: root))
     }
 
     @Test("a descendant of the root is contained")
     func descendantIsContained() {
         let descendant = root.appendingPathComponent("Sources/FileTool/File.swift")
-        #expect(TestSupport.path(descendant, isContainedBy: root))
+        #expect(TestSupport.path(candidate: descendant, isContainedBy: root))
     }
 
     @Test("a sibling directory sharing the root's string prefix is not contained")
     func siblingSharingPrefixIsNotContained() {
         let sibling = URL(fileURLWithPath: "/tmp/test-evil/file.swift")
-        #expect(!TestSupport.path(sibling, isContainedBy: root))
+        #expect(!TestSupport.path(candidate: sibling, isContainedBy: root))
     }
 
     @Test("a path escaping the root via `..` is not contained")
     func parentEscapeIsNotContained() {
         let escape = root.appendingPathComponent("../etc/passwd")
-        #expect(!TestSupport.path(escape, isContainedBy: root))
+        #expect(!TestSupport.path(candidate: escape, isContainedBy: root))
     }
 }
