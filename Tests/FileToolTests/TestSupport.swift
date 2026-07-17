@@ -24,4 +24,26 @@ enum TestSupport {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }
+
+    /// Whether `candidate` resolves to a path *contained within* `root` — the
+    /// root itself, or a genuine descendant of it — rather than merely sharing
+    /// the root's string prefix.
+    ///
+    /// Both URLs are standardized (collapsing `.` / `..` components) before
+    /// comparison. The trailing path separator on the prefix test is what
+    /// rejects a *sibling* that shares the root's prefix: for root `/tmp/test`,
+    /// `/tmp/test/a` is contained but `/tmp/test-evil` is not — a bare
+    /// `hasPrefix(root)` would wrongly admit the latter. The path-containment
+    /// scanners (`DocCCoverageScanner`, `ReadmeSnippets`) route their root guard
+    /// through here so the check lives in one place.
+    ///
+    /// - Parameters:
+    ///   - candidate: the path to test for containment.
+    ///   - root: the directory `candidate` must stay within.
+    /// - Returns: `true` iff `candidate` is `root` or a descendant of it.
+    static func path(_ candidate: URL, isContainedBy root: URL) -> Bool {
+        let rootPath = root.standardizedFileURL.path
+        let candidatePath = candidate.standardizedFileURL.path
+        return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+    }
 }

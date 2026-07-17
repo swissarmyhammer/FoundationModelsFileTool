@@ -61,6 +61,18 @@ struct DocCCoverageTests {
         }
     }
 
+    @Test("scanning a sibling directory that merely shares the root's path prefix throws")
+    func scanningSiblingSharingRootPrefixThrows() throws {
+        let base = TestSupport.makeTemporaryDirectory(named: "DocCCoverageContainment")
+        let root = base.appendingPathComponent("pkg", isDirectory: true)
+        let sibling = base.appendingPathComponent("pkg-evil", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        #expect(throws: (any Error).self) {
+            _ = try DocCCoverageScanner.scan(directory: "../pkg-evil", root: root)
+        }
+    }
+
     /// The package root directory, derived from this file's own path: three
     /// levels up from `Tests/FileToolTests/DocCCoverageTests.swift`.
     private func packageRoot(thisFile: String = #filePath) -> URL {
@@ -101,7 +113,7 @@ enum DocCCoverageScanner {
     /// - Throws: an error if `directory` escapes `root`, or a file cannot be read.
     static func scan(directory: String, root: URL) throws -> [Violation] {
         let directoryURL = root.appendingPathComponent(directory).standardizedFileURL
-        guard directoryURL.path.hasPrefix(root.standardizedFileURL.path) else {
+        guard TestSupport.path(directoryURL, isContainedBy: root) else {
             throw ScanError.pathEscapesPackageRoot(directory)
         }
         let enumerator = FileManager.default.enumerator(at: directoryURL, includingPropertiesForKeys: nil)

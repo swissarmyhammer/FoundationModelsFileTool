@@ -82,7 +82,7 @@ struct ReadmeSnippetTests {
     private func sourceFileLines(relativePath: String) throws -> [String] {
         let root = packageRoot()
         let fileURL = root.appendingPathComponent(relativePath).standardizedFileURL
-        guard fileURL.path.hasPrefix(root.standardizedFileURL.path) else {
+        guard TestSupport.path(fileURL, isContainedBy: root) else {
             throw PathEscapesPackageRoot(path: relativePath)
         }
         let contents = try String(contentsOf: fileURL, encoding: .utf8)
