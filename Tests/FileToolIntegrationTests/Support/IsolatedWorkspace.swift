@@ -36,6 +36,32 @@ enum IsolatedWorkspace {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    /// Canonicalizes an existing directory URL via `realpath`.
+    ///
+    /// Resolves every symlink in the path to its real on-disk location — most
+    /// importantly the macOS `/var` → `/private/var` prefix under which the
+    /// process temporary directory lives. ``PathGuard`` canonicalizes every
+    /// operated-on path the same way (`realpath`), and the diagnostics bridge
+    /// rebases item paths by prefix-matching a resolved context root against the
+    /// session root; a session root left in its unresolved `/var` form would fail
+    /// that prefix match and collapse item paths to context-relative, losing the
+    /// per-package prefix. Canonicalizing the session root up front keeps every
+    /// URL — session root, package roots, and the resolved diagnostic paths — in
+    /// one consistent `realpath` form so those assertions hold.
+    ///
+    /// - Parameter url: an existing directory URL to canonicalize.
+    /// - Returns: the `realpath`-resolved directory URL, or `url` unchanged if it
+    ///   cannot be resolved.
+    static func canonicalURL(_ url: URL) -> URL {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        return url.path.withCString { cString in
+            guard realpath(cString, &buffer) != nil else {
+                return url
+            }
+            return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+        }
+    }
+
     /// Runs `body` against a fresh temporary workspace, removing it afterward.
     ///
     /// The workspace is created before `body` runs and removed on every exit
@@ -101,6 +127,24 @@ enum IsolatedWorkspace {
     /// - Throws: a file-write or `git` error if scaffolding fails.
     static func scaffoldSwiftPackage(named name: String) throws -> ScaffoldedSwiftPackage {
         let root = try makeTemporaryDirectory(named: name)
+        return try scaffoldSwiftPackage(at: root)
+    }
+
+    /// Scaffolds the same package into an existing directory (a caller-owned root).
+    ///
+    /// The scaffold-into-a-directory half of ``scaffoldSwiftPackage(named:)``:
+    /// writes the manifest and every seed file under `root` and gives it its own
+    /// `git` history, but does *not* create the directory. This is what lets a
+    /// caller place several independent, git-initialized packages *under one
+    /// parent directory* — the multi-project session-root suite scaffolds one
+    /// package per child directory of a single session root this way — reusing the
+    /// identical manifest, seed table, and `git` initialization as the temp-dir
+    /// variant rather than duplicating them.
+    ///
+    /// - Parameter root: an existing directory to scaffold the package into.
+    /// - Returns: the scaffolded package's paths.
+    /// - Throws: a file-write or `git` error if scaffolding fails.
+    static func scaffoldSwiftPackage(at root: URL) throws -> ScaffoldedSwiftPackage {
         try write(PackageSources.manifest, to: root.appendingPathComponent("Package.swift"))
         for seed in PackageSources.seedFiles {
             try write(seed.contents, to: root.appendingPathComponent(seed.relativePath))

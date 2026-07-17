@@ -68,11 +68,15 @@ comments:
   id: 01kxq5bvzqvatvw0my528wx24e
   text: 'Iteration 3: both findings fixed, byte-identical (single file ChatValidationHarness.swift). (1) describe(_:) switch → private static let unavailabilityDescriptions: [SystemLanguageModel.Availability.UnavailableReason:String] (.deviceNotEligible/"device not eligible", .appleIntelligenceNotEnabled/"Apple Intelligence not enabled", .modelNotReady/"model not ready"); describe = single lookup unavailabilityDescriptions[reason] ?? "unknown reason" (reproduces old @unknown default arm byte-identical). Used dict (preferred) — UnavailableReason PROVEN Hashable (build clean + double-check swiftc -typecheck of dict+subscript+?? exit 0), not assumed. Outer availability switch (.available/.unavailable(reason)/@unknown default) untouched — gating intact. (2) private static let targetName="Demo" at top of Workspace; 4 sites now reference it: demoPathComponents=["Sources",targetName,"\(targetName).swift"], manifest→computed static var interpolating \(targetName) for name: + .target(name:). Byte-identical verified: standalone compare old-heredoc vs new-interpolated manifest== true (134==134 bytes), components== true; multiline base indentation/closing delimiter unchanged; lazy static init makes reference order-safe. Availability gating/--script/--chat/Package.resolved untouched. swift build --product file-demo complete; swift test 251 unit + 20 integration green, 0 failures; double-check PASS. Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-17T04:29:13.591866+00:00
+- actor: claude-code
+  id: 01kxq5t8jfxmd8w9pgdbssh525
+  text: 'DONE. Iteration 3 re-review clean (full 14/0, 0 findings). All 5 findings across 2 sections resolved. Task moved doing→review→done. Converged in 3 iterations (findings/round: 3→2→0; dimensions access-control+dup→data-table+DRY). --script (importable convergence path via same AnyOperation dispatch) + --chat (availability-gated LanguageModelSession harness, ran live: token 854, op-accuracy 2/2, PathGuard corrective + self-correct). Verified-good local commit: 3e70095 (green 271, file-demo builds). Not pushed. Checkpoint commits: ebf2ef4, e65d62d, 3e70095.'
+  timestamp: 2026-07-17T04:37:05.231149+00:00
 depends_on:
 - 01KXJWMRY1WHKFH4PNT731KY99
 - 01KXJWNFZ106SY3N2BWZKC0QPS
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9180'
 title: file-demo --chat and --script modes
 ---
 ## What
