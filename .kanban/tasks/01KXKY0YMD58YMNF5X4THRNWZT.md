@@ -63,11 +63,15 @@ comments:
   id: 01kxq8e232wjfvhr99vkgm6rky
   text: 'Iteration 2: all 3 findings fixed (test-support only; no Sources/seam/Package.resolved). (1) MultiProjectTests.normalizedPath body resolvingSymlinksInPath().standardizedFileURL.path → IsolatedWorkspace.canonicalURL(url).path — single-sourced realpath primitive (same as session-root canon + PathGuard operated-path canon), truly resolves /var→/private/var that resolvingSymlinksInPath left; docstring updated. (2) MultiProjectWorkspace.nestedSwiftRelativePath: "Sources/NestedRepo/Nested.swift" literal → computed static var interpolating nestedRepositoryDirectoryName (byte-identical). (3) pkgA/pkgB near-identical scaffold blocks → private scaffoldPackageDirectory(named:under:) called twice. Isolation assertions hold: both sides of every open-roots comparison go through normalizedPath, realpath determinism keeps exact-set equality ([PackageA],[PackageA,PackageB]) + superset poll + "nested never opened" negative meaningful/non-vacuous; no assertion/negative weakened. swift test --filter MultiProjectTests 6/6 ~17s; full 251 unit + 26 integration green ~25s, 0 warnings; double-check PASS (byte-identical string, canonicalURL realpath-on-existing-dir trailing-slash-free, negatives non-vacuous). Left in doing → /test → /commit → /review.'
   timestamp: 2026-07-17T05:22:51.106080+00:00
+- actor: claude-code
+  id: 01kxq8tp3fpwjsma926martfxm
+  text: 'DONE. Iteration 2 re-review clean (full 14/0, 0 findings). All 3 findings resolved. Task moved doing→review→done. Converged in 2 iterations (3→0). Multi-project real-LSP routing suite: cross-project isolation, project-scoped dependents, exact open-roots via accessor, nested-repo nearest-ancestor-wins, stray-file skips; caught+fixed the /var-symlink canonicalization consistency issue. All three integration suites (A/B/C) now done. Verified-good local commit: d0b5700 (green 277/277, real LSP). Not pushed. Checkpoint commits: 082ac0c, d0b5700.'
+  timestamp: 2026-07-17T05:29:44.815354+00:00
 depends_on:
 - 01KXJWKVHSPFD5TYG8B1CRX7KF
 - 01KXJWN2G2Z6MV4N7RSD96HKPG
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9280'
 title: 'Integration suite C: multi-project session root — per-project diagnostics routing with real LSP'
 ---
 ## What

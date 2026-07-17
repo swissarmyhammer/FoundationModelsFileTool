@@ -55,10 +55,10 @@ enum IsolatedWorkspace {
     static func canonicalURL(_ url: URL) -> URL {
         var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
         return url.path.withCString { cString in
-            guard realpath(cString, &buffer) != nil else {
+            guard let resolved = realpath(cString, &buffer) else {
                 return url
             }
-            return URL(fileURLWithPath: String(cString: buffer), isDirectory: true)
+            return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
         }
     }
 
