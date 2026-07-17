@@ -8,13 +8,13 @@ on:
 
 jobs:
   build-and-test:
-    # The package targets `.macOS("27.0")` only — `FoundationModelsCodeContext`
-    # (the live edit-diagnostics dependency) declares macOS 27 as its floor and
-    # spawns `sourcekit-lsp` subprocesses, so it cannot build or run on Linux or
-    # older macOS images. `macos-latest` tracks GitHub's newest available macOS
-    # image; the `swift build` step below fails loudly if that image is older
-    # than the package's macOS 27 deployment floor.
-    runs-on: macos-latest
+    # Self-hosted macOS runner: the package targets `.macOS("27.0")` only —
+    # `FoundationModelsCodeContext` (the live edit-diagnostics dependency)
+    # declares macOS 27 as its floor and spawns `sourcekit-lsp` subprocesses, so
+    # the package cannot build or run on Linux or older macOS images. No
+    # GitHub-hosted image satisfies the macOS 27 floor, so CI runs on a
+    # self-hosted macOS runner.
+    runs-on: [self-hosted, macOS]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
