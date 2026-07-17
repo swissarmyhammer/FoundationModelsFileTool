@@ -41,11 +41,16 @@ let package = Package(
     targets: [
         // Core library target: the file operations and their supporting
         // runtime. Applying `@Operation` pulls in `Operations`; the
-        // `DiagnosticsBridge` consumes `FoundationModelsCodeContext`.
+        // `DiagnosticsBridge` consumes `FoundationModelsCodeContext`;
+        // `OperationsCLI` supplies the `OperationCLIDriver` that `FileToolCLI`
+        // drives the fused tool through, so the CLI-convergence wiring lives in
+        // the library (importable by both `file-demo` and the tests) rather than
+        // buried in the executable's `main`.
         .target(
             name: "FileTool",
             dependencies: [
                 .product(name: "Operations", package: "FoundationModelsOperationTool"),
+                .product(name: "OperationsCLI", package: "FoundationModelsOperationTool"),
                 .product(name: "FoundationModelsCodeContext", package: "FoundationModelsCodeContext"),
             ]
         ),
