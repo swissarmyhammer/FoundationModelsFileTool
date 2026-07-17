@@ -25,8 +25,8 @@ comments:
   timestamp: 2026-07-17T10:09:31.828081+00:00
 depends_on:
 - 01KXPCH7YPSHMNM7GA1ZPABM1W
-position_column: doing
-position_ordinal: '80'
+position_column: done
+position_ordinal: '9880'
 title: '`patch files` operation: @Operation wiring, result envelope, and format-teaching description'
 ---
 ## What
