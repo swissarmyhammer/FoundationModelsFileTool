@@ -158,7 +158,13 @@ public enum FileTool {
     /// - Parameter operation: the op string of the rejected mutation
     ///   (`write file` or `edit file`).
     /// - Returns: the corrective message naming the operation.
-    static func readOnlyRejectionMessage(forOperation operation: String) -> String {
+    ///
+    /// - Note: `fileprivate`, not `private`: the only callers are the
+    ///   ``ReadOnlyWriteFile`` / ``ReadOnlyEditFile`` stub `execute(in:)` bodies,
+    ///   which are separate top-level types in this file, so a `private` member
+    ///   of `FileTool` would be out of their scope. `fileprivate` is the tightest
+    ///   access level that stays reachable by those callers.
+    fileprivate static func readOnlyRejectionMessage(forOperation operation: String) -> String {
         "The `\(operation)` operation is not available in read-only mode."
     }
 
@@ -297,6 +303,23 @@ public enum FileTool {
 
 // MARK: - Read-only mutation stubs
 
+// `ReadOnlyWriteFile` and `ReadOnlyEditFile` are deliberately two distinct
+// concrete types rather than one parameterized (or generic) struct. Fusion
+// dispatches to concrete operations by their `@Operation` verb/noun pair and
+// returns each operation's own typed `Output`: the read-only `write file` must
+// return `WriteOutput` and `edit file` must return `EditOutput`. The
+// `@Generable` / `@Operation` macros synthesize that per-type machinery from a
+// concrete declaration — and `WriteOutput` / `EditOutput` share no common
+// `corrective(_:)` factory to generalize over (`WriteOutput` is not even
+// `CorrectiveEncodable`; that protocol governs only *encoding*, not
+// construction) — so no single struct can stand in for both output types.
+//
+// All behavior-bearing logic — the rejection message — is single-sourced in
+// `FileTool.readOnlyRejectionMessage(forOperation:)`, which both stubs' one-line
+// `execute(in:)` bodies call, so a change to the rejection behavior stays in one
+// place. What remains distinct between the two is only the irreducible macro
+// boilerplate: the two declarations and their differing `Output` types.
+
 /// The `write file` stub for the read-only tool: accepts the op but always
 /// returns the read-only corrective without touching the filesystem.
 ///
@@ -306,7 +329,7 @@ public enum FileTool {
 /// corrective rather than an unknown-operation message.
 @Generable
 @Operation(verb: "write", noun: "file", description: "Rejected: writing is not available in a read-only session")
-struct ReadOnlyWriteFile: Sendable {
+private struct ReadOnlyWriteFile: Sendable {
 }
 
 extension ReadOnlyWriteFile {
@@ -328,7 +351,7 @@ extension ReadOnlyWriteFile {
 /// A unit struct, for the same reason as ``ReadOnlyWriteFile``.
 @Generable
 @Operation(verb: "edit", noun: "file", description: "Rejected: editing is not available in a read-only session")
-struct ReadOnlyEditFile: Sendable {
+private struct ReadOnlyEditFile: Sendable {
 }
 
 extension ReadOnlyEditFile {
