@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+# Only one self-hosted macOS runner backs this repo, so without this a queue
+# of superseded pushes stacks up single-file behind whatever is currently
+# running — each new commit waiting hours for every older, already-obsolete
+# run to finish first. Cancelling the in-progress run for the same ref as
+# soon as a newer commit lands keeps the queue to at most one run deep.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     # Self-hosted macOS runner: the package targets `.macOS("27.0")` only —
@@ -15,12 +24,38 @@ jobs:
     # GitHub-hosted image satisfies the macOS 27 floor, so CI runs on a
     # self-hosted macOS runner.
     runs-on: [self-hosted, macOS]
+    # A hard ceiling so a stuck run (e.g. a runaway sourcekit-lsp background
+    # index) fails loudly and frees the one self-hosted runner for the next
+    # commit, instead of sitting in progress indefinitely.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Swift version
         run: swift --version
+
+      # sourcekit-lsp's background indexer eagerly prepares every target in
+      # the *whole* resolved package graph — including dev-only targets
+      # (e.g. a dependency-of-a-dependency's own Benchmarks target) that
+      # nothing in this package ever builds or imports. With `main`-branch
+      # dependencies and no committed Package.resolved, that fans out into a
+      # deeply recursive `.build/index-build/checkouts/.../checkouts/...`
+      # resolve-and-build chain that has been observed pinning a background
+      # `swift-build --experimental-prepare-for-indexing` process for well
+      # over an hour on this runner. The real-LSP integration tests only need
+      # on-demand, per-file diagnostics (see `DiagnosticsProbe.awaitDiagnostics`),
+      # never proactive whole-graph indexing, so this is safe to turn off for
+      # CI. Scoped to the CI workspace only (not committed) so local
+      # interactive editors keep normal background indexing.
+      - name: Disable sourcekit-lsp background indexing for CI
+        run: |
+          mkdir -p .sourcekit-lsp
+          cat > .sourcekit-lsp/config.json <<'EOF'
+          {
+            "backgroundIndexing": false
+          }
+          EOF
 
       - name: Build
         run: swift build
