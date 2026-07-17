@@ -132,7 +132,11 @@ enum IsolatedWorkspace {
     /// A fixed, self-contained identity passed per-invocation with `-c` so the
     /// scaffolding never depends on (or mutates) the machine's global `git`
     /// configuration.
-    private static let gitIdentityArguments = [
+    ///
+    /// - Note: `internal`, not `private`: suite B's cross-op tests reuse it to
+    ///   attribute the commits they make while building a git-aware fixture
+    ///   (a `.gitignore` scenario), rather than re-declaring the identity.
+    static let gitIdentityArguments = [
         "-c", "user.name=FileTool Integration",
         "-c", "user.email=integration@example.invalid",
     ]
@@ -146,7 +150,11 @@ enum IsolatedWorkspace {
     ///
     /// - Parameter root: the package root to initialize.
     /// - Throws: a ``GitError`` if any `git` invocation exits non-zero.
-    private static func initializeGitRepository(at root: URL) throws {
+    ///
+    /// - Note: `internal`, not `private`: suite B reuses it (and ``runGit(_:in:)``)
+    ///   to git-initialize a plain isolated workspace for its `.gitignore`
+    ///   end-to-end row, rather than duplicating the `git init` sequence.
+    static func initializeGitRepository(at root: URL) throws {
         try runGit(["init", "--quiet"], in: root)
         try runGit(gitIdentityArguments + ["add", "--all"], in: root)
         try runGit(gitIdentityArguments + ["commit", "--quiet", "--message", "Initial scaffold"], in: root)
@@ -167,7 +175,11 @@ enum IsolatedWorkspace {
     ///   - arguments: the `git` arguments (excluding the `git` executable).
     ///   - directory: the working directory to run in.
     /// - Throws: a ``GitError`` if `git` exits non-zero, or a launch error.
-    private static func runGit(_ arguments: [String], in directory: URL) throws {
+    ///
+    /// - Note: `internal`, not `private`: suite B's `.gitignore` row reuses it to
+    ///   stage specific files (leaving the ignored file untracked) so the
+    ///   git-aware walk can be exercised end to end.
+    static func runGit(_ arguments: [String], in directory: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git"] + arguments
