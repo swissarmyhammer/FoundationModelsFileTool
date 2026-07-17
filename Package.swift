@@ -23,7 +23,7 @@ let package = Package(
     dependencies: [
         // The `@Operation` macro, schema fusion, `OperationTool` dispatch, and
         // the ArgumentParser CLI driver (`Operations` + `OperationsCLI`
-        // products). Private repo, pinned to `main`.
+        // products). Pinned to `main`.
         .package(
             url: "git@github.com:swissarmyhammer/FoundationModelsOperationTool.git",
             branch: "main"
