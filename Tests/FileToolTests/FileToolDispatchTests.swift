@@ -20,15 +20,6 @@ import Testing
 @Suite struct FileToolDispatchTests {
     // MARK: Test scaffolding
 
-    /// Build a `GeneratedContent` payload from ordered key/value entries.
-    ///
-    /// - Parameter entries: the payload's properties, in order; a later
-    ///   duplicate key wins.
-    /// - Returns: the assembled structure payload.
-    private static func payload(_ entries: [(String, any ConvertibleToGeneratedContent)]) -> GeneratedContent {
-        GeneratedContent(properties: entries, uniquingKeysWith: { _, new in new })
-    }
-
     /// Create a fresh temporary session directory seeded with one text file.
     ///
     /// - Parameters:
@@ -59,7 +50,7 @@ import Testing
         let (context, path) = try Self.makeContext()
         let tool = try FileTool.make(context: context)
 
-        let json = try await tool.call(arguments: Self.payload([("op", "read file"), ("path", path)]))
+        let json = try await tool.call(arguments: TestSupport.payload([("op", "read file"), ("path", path)]))
 
         #expect(json.contains("\"hash\""))
         #expect(json.contains("needle here"))
@@ -71,7 +62,7 @@ import Testing
         let tool = try FileTool.make(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([("op", "write file"), ("filePath", target), ("content", "brand new\n")])
+            arguments: TestSupport.payload([("op", "write file"), ("filePath", target), ("content", "brand new\n")])
         )
 
         #expect(json.contains("\"bytesWritten\""))
@@ -83,7 +74,7 @@ import Testing
         let tool = try FileTool.make(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([
+            arguments: TestSupport.payload([
                 ("op", "edit file"), ("filePath", path), ("find", ["needle"]), ("replace", ["thread"]),
             ])
         )
@@ -96,7 +87,7 @@ import Testing
         let (context, _) = try Self.makeContext(seeding: "alpha.swift", contents: "let a = 1\n")
         let tool = try FileTool.make(context: context)
 
-        let json = try await tool.call(arguments: Self.payload([("op", "glob files"), ("pattern", "*.swift")]))
+        let json = try await tool.call(arguments: TestSupport.payload([("op", "glob files"), ("pattern", "*.swift")]))
 
         #expect(json.contains("alpha.swift"))
     }
@@ -106,7 +97,7 @@ import Testing
         let tool = try FileTool.make(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([("op", "grep files"), ("pattern", "needle"), ("path", path)])
+            arguments: TestSupport.payload([("op", "grep files"), ("pattern", "needle"), ("path", path)])
         )
 
         #expect(json.contains("needle here"))
@@ -119,7 +110,7 @@ import Testing
         let tool = try FileTool.make(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([
+            arguments: TestSupport.payload([
                 ("op", "edit file"),
                 ("file_path", path),
                 ("old_string", ["needle"]),
@@ -138,7 +129,7 @@ import Testing
         let tool = try FileTool.make(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([
+            arguments: TestSupport.payload([
                 ("file_path", path),
                 ("old_string", ["needle"]),
                 ("new_string", ["thread"]),
@@ -152,78 +143,78 @@ import Testing
     // MARK: Inference matrix — every precedence branch
 
     @Test func infersEditFromEditsKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("edits", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("edits", ["x"])])) == "edit file")
     }
 
     @Test func infersEditFromCanonicalFindKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("find", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("find", ["x"])])) == "edit file")
     }
 
     @Test func infersEditFromFindIshAliasKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("old_string", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("old_string", ["x"])])) == "edit file")
     }
 
     @Test func infersEditFromCanonicalReplaceKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("replace", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("replace", ["x"])])) == "edit file")
     }
 
     @Test func infersEditFromReplaceIshAliasKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("new_string", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("new_string", ["x"])])) == "edit file")
     }
 
     @Test func infersEditFromUppercaseAliasKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("OLD_STRING", ["x"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("OLD_STRING", ["x"])])) == "edit file")
     }
 
     @Test func infersWriteFromMixedCaseContentKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("Content", "x")])) == "write file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("Content", "x")])) == "write file")
     }
 
     @Test func infersWriteFromContentKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("content", "x")])) == "write file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("content", "x")])) == "write file")
     }
 
     @Test func editTakesPrecedenceOverWriteWhenBothPresent() {
-        #expect(FileTool.inferOperation(from: Self.payload([("content", "x"), ("find", ["y"])])) == "edit file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("content", "x"), ("find", ["y"])])) == "edit file")
     }
 
     @Test func infersGrepFromPatternPlusCaseInsensitiveMarker() {
         #expect(
-            FileTool.inferOperation(from: Self.payload([("pattern", "x"), ("caseInsensitive", true)])) == "grep files"
+            FileTool.inferOperation(from: TestSupport.payload([("pattern", "x"), ("caseInsensitive", true)])) == "grep files"
         )
     }
 
     @Test func infersGrepFromPatternPlusContextLinesMarker() {
-        #expect(FileTool.inferOperation(from: Self.payload([("pattern", "x"), ("contextLines", 2)])) == "grep files")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("pattern", "x"), ("contextLines", 2)])) == "grep files")
     }
 
     @Test func infersGrepFromPatternPlusOutputModeMarker() {
         #expect(
-            FileTool.inferOperation(from: Self.payload([("pattern", "x"), ("outputMode", "count")])) == "grep files"
+            FileTool.inferOperation(from: TestSupport.payload([("pattern", "x"), ("outputMode", "count")])) == "grep files"
         )
     }
 
     @Test func infersGlobFromPatternAlone() {
-        #expect(FileTool.inferOperation(from: Self.payload([("pattern", "x")])) == "glob files")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("pattern", "x")])) == "glob files")
     }
 
     @Test func infersReadFromPathAlone() {
-        #expect(FileTool.inferOperation(from: Self.payload([("path", "x")])) == "read file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("path", "x")])) == "read file")
     }
 
     @Test func infersReadFromPathAliasAlone() {
-        #expect(FileTool.inferOperation(from: Self.payload([("file_path", "x")])) == "read file")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("file_path", "x")])) == "read file")
     }
 
     @Test func inferenceReturnsNilForUndeterminablePayload() {
-        #expect(FileTool.inferOperation(from: Self.payload([("mystery", "x")])) == nil)
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("mystery", "x")])) == nil)
     }
 
     @Test func undeterminablePayloadDispatchYieldsCorrectiveNamingAllSixOps() async throws {
         let (context, _) = try Self.makeContext()
         let tool = try FileTool.make(context: context)
 
-        let message = try await tool.call(arguments: Self.payload([("mystery", "x")]))
+        let message = try await tool.call(arguments: TestSupport.payload([("mystery", "x")]))
 
         for opString in ["read file", "write file", "edit file", "glob files", "grep files", "patch files"] {
             #expect(message.contains(opString))
@@ -238,7 +229,7 @@ import Testing
         let tool = try FileTool.makeReadOnly(context: context)
 
         let message = try await tool.call(
-            arguments: Self.payload([("op", "write file"), ("filePath", target), ("content", "nope\n")])
+            arguments: TestSupport.payload([("op", "write file"), ("filePath", target), ("content", "nope\n")])
         )
 
         #expect(message.contains("not available in read-only mode"))
@@ -250,7 +241,7 @@ import Testing
         let tool = try FileTool.makeReadOnly(context: context)
 
         let message = try await tool.call(
-            arguments: Self.payload([
+            arguments: TestSupport.payload([
                 ("op", "edit file"), ("filePath", path), ("find", ["needle"]), ("replace", ["thread"]),
             ])
         )
@@ -263,7 +254,7 @@ import Testing
         let (context, path) = try Self.makeContext()
         let tool = try FileTool.makeReadOnly(context: context)
 
-        let json = try await tool.call(arguments: Self.payload([("op", "read file"), ("path", path)]))
+        let json = try await tool.call(arguments: TestSupport.payload([("op", "read file"), ("path", path)]))
 
         #expect(json.contains("needle here"))
     }
@@ -272,7 +263,7 @@ import Testing
         let (context, _) = try Self.makeContext(seeding: "alpha.swift", contents: "let a = 1\n")
         let tool = try FileTool.makeReadOnly(context: context)
 
-        let json = try await tool.call(arguments: Self.payload([("op", "glob files"), ("pattern", "*.swift")]))
+        let json = try await tool.call(arguments: TestSupport.payload([("op", "glob files"), ("pattern", "*.swift")]))
 
         #expect(json.contains("alpha.swift"))
     }
@@ -282,7 +273,7 @@ import Testing
         let tool = try FileTool.makeReadOnly(context: context)
 
         let json = try await tool.call(
-            arguments: Self.payload([("op", "grep files"), ("pattern", "needle"), ("path", path)])
+            arguments: TestSupport.payload([("op", "grep files"), ("pattern", "needle"), ("path", path)])
         )
 
         #expect(json.contains("needle here"))

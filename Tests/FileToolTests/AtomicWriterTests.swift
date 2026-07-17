@@ -28,11 +28,6 @@ import Testing
 
     // MARK: Staged multi-file commit
 
-    /// The permission bits of a file, or `nil` when its attributes are unreadable.
-    private static func permissionBits(_ path: String) -> Int? {
-        (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? nil
-    }
-
     @Test func stageCreatesTempInDestinationDirectoryWithoutTouchingDestination() throws {
         let root = TestSupport.makeTemporaryDirectory(named: "AtomicWriterTests")
         let target = root.appendingPathComponent("file.txt")
@@ -120,7 +115,7 @@ import Testing
         let staged = try AtomicWriter.stage(Data("#!/bin/sh\necho hi\n".utf8), to: target)
         try staged.commit()
 
-        #expect(Self.permissionBits(target.path) == 0o755, "staging over a 0755 file must keep it 0755")
+        #expect(TestSupport.permissionBits(target.path) == 0o755, "staging over a 0755 file must keep it 0755")
     }
 
     @Test func stageCleansUpTempWhenWriteFails() throws {

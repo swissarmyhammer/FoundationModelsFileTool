@@ -71,23 +71,6 @@ import Testing
         try Data(contentsOf: URL(fileURLWithPath: path))
     }
 
-    /// The POSIX permission bits (`mode & 0o777`) of a path.
-    ///
-    /// - Parameter path: the absolute path to inspect.
-    /// - Returns: the permission bits, or `nil` when the attributes are unreadable.
-    private static func permissionBits(_ path: String) -> Int? {
-        (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? nil
-    }
-
-    /// The names of directory entries whose name marks them as a leftover temporary file.
-    ///
-    /// - Parameter directory: the directory URL to scan.
-    /// - Returns: the names of any temporary-file leftovers.
-    private static func temporaryFileLeftovers(in directory: URL) -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.contains(".tmp.") }
-    }
-
     /// The UTF-8 byte-order-mark bytes (`EF BB BF`).
     private static let utf8ByteOrderMark = Data([0xEF, 0xBB, 0xBF])
 
@@ -194,7 +177,7 @@ import Testing
             .execute(in: context)
         _ = try #require(output.resultValue)
 
-        #expect(Self.permissionBits(path) == 0o755, "editing a 0755 file must keep it 0755")
+        #expect(TestSupport.permissionBits(path) == 0o755, "editing a 0755 file must keep it 0755")
     }
 
     // MARK: Read-only file
@@ -234,7 +217,7 @@ import Testing
         let message = try #require(output.correctiveValue)
 
         #expect(!message.isEmpty)
-        #expect(Self.temporaryFileLeftovers(in: lockedDirectory).isEmpty, "a failed commit must remove the temp file")
+        #expect(TestSupport.temporaryFileLeftovers(in: lockedDirectory).isEmpty, "a failed commit must remove the temp file")
         #expect(try Self.readBytes(fileURL.path) == original, "a failed commit must leave the file byte-identical")
     }
 
@@ -293,6 +276,25 @@ import Testing
         #expect(json.contains("U+2019"))
         #expect(json.contains("U+0027"))
         #expect(try Self.readBytes(path) == original, "a near-miss must leave the file byte-identical")
+    }
+
+    @Test func genuinelyDifferentNearMissHasNoConfusableNote() async throws {
+        // The mirror of `nearMissEditSurfacesAConfusablePunctuationNote`: this
+        // near-miss differs by a real word rather than by confusable punctuation,
+        // so the note must be absent rather than attached to every near-miss diff.
+        let original = Data("the quick brown fox\n".utf8)
+        let (context, _, path) = try Self.makeContext(seeding: original)
+        let output = try await Self.makeOperation(filePath: path, find: ["the quick red fox"], replace: ["X"])
+            .execute(in: context)
+        let result = try #require(output.resultValue)
+
+        #expect(result.status == "nearMiss")
+        let nearMiss = try #require(result.outcomes.first?.nearMisses?.first)
+        #expect(nearMiss.note == nil)
+
+        // The absent note is omitted from the Encodable wire projection too.
+        let json = String(decoding: try JSONEncoder().encode(nearMiss), as: UTF8.self)
+        #expect(!json.contains("\"note\""))
     }
 
     @Test func alreadyAppliedEditIsReportedAndCommitsNothing() async throws {

@@ -41,15 +41,6 @@ import Testing
     /// makes the CLI-path and model-path outputs directly comparable.
     private static let volatileConvergenceKeys: Set<String> = ["elapsedMs"]
 
-    /// Build a `GeneratedContent` payload from ordered key/value entries.
-    ///
-    /// - Parameter entries: the payload's properties, in order; a later
-    ///   duplicate key wins.
-    /// - Returns: the assembled structure payload.
-    private static func payload(_ entries: [(String, any ConvertibleToGeneratedContent)]) -> GeneratedContent {
-        GeneratedContent(properties: entries, uniquingKeysWith: { _, new in new })
-    }
-
     /// Canonicalize a JSON string for convergence comparison: parse it, strip
     /// every ``volatileConvergenceKeys`` entry recursively, and re-serialize
     /// with sorted keys.
@@ -127,7 +118,7 @@ import Testing
                 prepare: { try seed("sample.txt", contents: seedContents, in: $0) },
                 arguments: { ["file", "read", "--path", $0.appendingPathComponent("sample.txt").path, "--offset", "2"] },
                 modelPayload: {
-                    payload([("op", "read file"), ("path", $0.appendingPathComponent("sample.txt").path), ("offset", 2)])
+                    TestSupport.payload([("op", "read file"), ("path", $0.appendingPathComponent("sample.txt").path), ("offset", 2)])
                 }
             ),
             ConvergenceCase(
@@ -139,7 +130,7 @@ import Testing
                 prepare: { try? FileManager.default.removeItem(at: $0.appendingPathComponent("new.txt")) },
                 arguments: { ["file", "write", "--file-path", $0.appendingPathComponent("new.txt").path, "--content", "brand new\n"] },
                 modelPayload: {
-                    payload([
+                    TestSupport.payload([
                         ("op", "write file"),
                         ("filePath", $0.appendingPathComponent("new.txt").path),
                         ("content", "brand new\n"),
@@ -153,7 +144,7 @@ import Testing
                     ["file", "edit", "--file-path", $0.appendingPathComponent("edit.txt").path, "--find", "needle", "--replace", "thread"]
                 },
                 modelPayload: {
-                    payload([
+                    TestSupport.payload([
                         ("op", "edit file"),
                         ("filePath", $0.appendingPathComponent("edit.txt").path),
                         ("find", ["needle"]),
@@ -165,14 +156,14 @@ import Testing
                 name: "glob files",
                 prepare: { try seed("alpha.swift", contents: "let a = 1\n", in: $0) },
                 arguments: { _ in ["files", "glob", "--pattern", "*.swift"] },
-                modelPayload: { _ in payload([("op", "glob files"), ("pattern", "*.swift")]) }
+                modelPayload: { _ in TestSupport.payload([("op", "glob files"), ("pattern", "*.swift")]) }
             ),
             ConvergenceCase(
                 name: "grep files",
                 prepare: { try seed("grep.txt", contents: seedContents, in: $0) },
                 arguments: { ["files", "grep", "--pattern", "needle", "--path", $0.appendingPathComponent("grep.txt").path] },
                 modelPayload: {
-                    payload([("op", "grep files"), ("pattern", "needle"), ("path", $0.appendingPathComponent("grep.txt").path)])
+                    TestSupport.payload([("op", "grep files"), ("pattern", "needle"), ("path", $0.appendingPathComponent("grep.txt").path)])
                 }
             ),
         ]

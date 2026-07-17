@@ -41,11 +41,6 @@ import Testing
         return url.path
     }
 
-    /// The absolute path of `name` under `root` without creating it.
-    private static func path(_ name: String, in root: URL) -> String {
-        root.appendingPathComponent(name, isDirectory: false).path
-    }
-
     /// The raw on-disk bytes of a file, or `nil` when it does not exist.
     private static func bytes(_ path: String) -> Data? {
         try? Data(contentsOf: URL(fileURLWithPath: path))
@@ -54,12 +49,6 @@ import Testing
     /// Whether a file exists on disk.
     private static func exists(_ path: String) -> Bool {
         FileManager.default.fileExists(atPath: path)
-    }
-
-    /// The names of temporary-file leftovers in a directory.
-    private static func temporaryLeftovers(in directory: URL) -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.contains(".tmp.") }
     }
 
     /// Set or clear the user-immutable (`UF_IMMUTABLE`) flag on a file.
@@ -80,8 +69,13 @@ import Testing
     }
 
     /// The outcome whose reported path ends with `suffix`.
+    ///
+    /// - Parameters:
+    ///   - outcomes: the outcomes to search.
+    ///   - suffix: the path suffix identifying the wanted outcome.
+    /// - Returns: the first matching outcome, or `nil` when none matches.
     private static func outcome(
-        _ outcomes: [PatchEngine.FileOutcome],
+        in outcomes: [PatchEngine.FileOutcome],
         endingWith suffix: String
     ) -> PatchEngine.FileOutcome? {
         outcomes.first { $0.path.hasSuffix(suffix) }
@@ -96,45 +90,45 @@ import Testing
         try Self.seed(Data("keep me\n".utf8), named: "source.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .addFile(path: Self.path("added.txt", in: root), contents: "added\n"),
-            .updateFile(path: Self.path("update.txt", in: root), movePath: nil, pairs: [(find: "two", replace: "TWO")]),
-            .deleteFile(path: Self.path("delete.txt", in: root)),
-            .updateFile(path: Self.path("source.txt", in: root), movePath: Self.path("dest.txt", in: root), pairs: []),
+            .addFile(path: TestSupport.path("added.txt", in: root), contents: "added\n"),
+            .updateFile(path: TestSupport.path("update.txt", in: root), movePath: nil, pairs: [(find: "two", replace: "TWO")]),
+            .deleteFile(path: TestSupport.path("delete.txt", in: root)),
+            .updateFile(path: TestSupport.path("source.txt", in: root), movePath: TestSupport.path("dest.txt", in: root), pairs: []),
         ]
 
         let outcomes = try Self.apply(hunks, using: pathGuard)
 
         // Add
-        #expect(Self.bytes(Self.path("added.txt", in: root)) == Data("added\n".utf8))
-        let add = try #require(Self.outcome(outcomes, endingWith: "added.txt"))
+        #expect(Self.bytes(TestSupport.path("added.txt", in: root)) == Data("added\n".utf8))
+        let add = try #require(Self.outcome(in: outcomes, endingWith: "added.txt"))
         #expect(add.action == .added)
         #expect(add.appliedPairs == 0)
         #expect(add.bytesWritten == Data("added\n".utf8).count)
         #expect(add.hash == Hashline.wholeFileHash(bytes: Data("added\n".utf8)))
 
         // Update
-        #expect(Self.bytes(Self.path("update.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
-        let update = try #require(Self.outcome(outcomes, endingWith: "update.txt"))
+        #expect(Self.bytes(TestSupport.path("update.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
+        let update = try #require(Self.outcome(in: outcomes, endingWith: "update.txt"))
         #expect(update.action == .modified)
         #expect(update.appliedPairs == 1)
         #expect(update.hash == Hashline.wholeFileHash(bytes: Data("one\nTWO\nthree\n".utf8)))
 
         // Delete
-        #expect(!Self.exists(Self.path("delete.txt", in: root)))
-        let delete = try #require(Self.outcome(outcomes, endingWith: "delete.txt"))
+        #expect(!Self.exists(TestSupport.path("delete.txt", in: root)))
+        let delete = try #require(Self.outcome(in: outcomes, endingWith: "delete.txt"))
         #expect(delete.action == .deleted)
         #expect(delete.bytesWritten == nil)
         #expect(delete.hash == nil)
 
         // Move
-        #expect(!Self.exists(Self.path("source.txt", in: root)))
-        #expect(Self.bytes(Self.path("dest.txt", in: root)) == Data("keep me\n".utf8))
-        let move = try #require(Self.outcome(outcomes, endingWith: "source.txt"))
+        #expect(!Self.exists(TestSupport.path("source.txt", in: root)))
+        #expect(Self.bytes(TestSupport.path("dest.txt", in: root)) == Data("keep me\n".utf8))
+        let move = try #require(Self.outcome(in: outcomes, endingWith: "source.txt"))
         #expect(move.action == .moved)
         #expect(move.movedTo?.hasSuffix("dest.txt") == true)
         #expect(move.hash == Hashline.wholeFileHash(bytes: Data("keep me\n".utf8)))
 
-        #expect(Self.temporaryLeftovers(in: root).isEmpty)
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty)
     }
 
     // MARK: Abort-all on an unresolved update
@@ -147,10 +141,10 @@ import Testing
         try Self.seed(editBytes, named: "no-match.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .addFile(path: Self.path("new.txt", in: root), contents: "new\n"),
-            .updateFile(path: Self.path("will-edit.txt", in: root), movePath: nil, pairs: [(find: "beta", replace: "BETA")]),
+            .addFile(path: TestSupport.path("new.txt", in: root), contents: "new\n"),
+            .updateFile(path: TestSupport.path("will-edit.txt", in: root), movePath: nil, pairs: [(find: "beta", replace: "BETA")]),
             .updateFile(
-                path: Self.path("no-match.txt", in: root),
+                path: TestSupport.path("no-match.txt", in: root),
                 movePath: nil,
                 pairs: [(find: "nowhere-to-be-found", replace: "x")]
             ),
@@ -165,10 +159,10 @@ import Testing
         if case .noMatch = resolution {} else { Issue.record("expected .noMatch resolution, got \(resolution)") }
 
         // Every file byte-identical; nothing added.
-        #expect(Self.bytes(Self.path("will-edit.txt", in: root)) == updateBytes)
-        #expect(Self.bytes(Self.path("no-match.txt", in: root)) == editBytes)
-        #expect(!Self.exists(Self.path("new.txt", in: root)))
-        #expect(Self.temporaryLeftovers(in: root).isEmpty)
+        #expect(Self.bytes(TestSupport.path("will-edit.txt", in: root)) == updateBytes)
+        #expect(Self.bytes(TestSupport.path("no-match.txt", in: root)) == editBytes)
+        #expect(!Self.exists(TestSupport.path("new.txt", in: root)))
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty)
     }
 
     // MARK: Phase-1 correctives
@@ -180,8 +174,8 @@ import Testing
         try Self.seed(Data("victim\n".utf8), named: "other.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .deleteFile(path: Self.path("other.txt", in: root)),
-            .addFile(path: Self.path("exists.txt", in: root), contents: "clobber\n"),
+            .deleteFile(path: TestSupport.path("other.txt", in: root)),
+            .addFile(path: TestSupport.path("exists.txt", in: root), contents: "clobber\n"),
         ]
 
         let failure = Self.failure(PatchEngine.apply(hunks, using: pathGuard))
@@ -190,13 +184,13 @@ import Testing
             return
         }
         // Nothing was touched: the existing file is intact and the delete did not happen.
-        #expect(Self.bytes(Self.path("exists.txt", in: root)) == existingBytes)
-        #expect(Self.exists(Self.path("other.txt", in: root)))
+        #expect(Self.bytes(TestSupport.path("exists.txt", in: root)) == existingBytes)
+        #expect(Self.exists(TestSupport.path("other.txt", in: root)))
     }
 
     @Test func deleteOfNonexistentFileAborts() throws {
         let (root, pathGuard) = Self.makeFixture()
-        let hunks: [PatchParser.Hunk] = [.deleteFile(path: Self.path("ghost.txt", in: root))]
+        let hunks: [PatchParser.Hunk] = [.deleteFile(path: TestSupport.path("ghost.txt", in: root))]
         guard case .corrective = Self.failure(PatchEngine.apply(hunks, using: pathGuard)) else {
             Issue.record("expected .corrective for a missing delete target")
             return
@@ -208,13 +202,13 @@ import Testing
         let binary = Data([0xFF, 0xFE, 0x00, 0x01, 0x80])
         try Self.seed(binary, named: "image.bin", in: root)
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("image.bin", in: root), movePath: nil, pairs: [(find: "a", replace: "b")])
+            .updateFile(path: TestSupport.path("image.bin", in: root), movePath: nil, pairs: [(find: "a", replace: "b")])
         ]
         guard case .corrective = Self.failure(PatchEngine.apply(hunks, using: pathGuard)) else {
             Issue.record("expected .corrective for a binary update target")
             return
         }
-        #expect(Self.bytes(Self.path("image.bin", in: root)) == binary)
+        #expect(Self.bytes(TestSupport.path("image.bin", in: root)) == binary)
     }
 
     // MARK: Encoding / line-ending preservation
@@ -228,14 +222,14 @@ import Testing
         try Self.seed(lfOriginal, named: "lf.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("crlf.txt", in: root), movePath: nil, pairs: [(find: "beta", replace: "BETA")]),
-            .updateFile(path: Self.path("lf.txt", in: root), movePath: nil, pairs: [(find: "two", replace: "TWO")]),
+            .updateFile(path: TestSupport.path("crlf.txt", in: root), movePath: nil, pairs: [(find: "beta", replace: "BETA")]),
+            .updateFile(path: TestSupport.path("lf.txt", in: root), movePath: nil, pairs: [(find: "two", replace: "TWO")]),
         ]
 
         _ = try Self.apply(hunks, using: pathGuard)
 
-        #expect(Self.bytes(Self.path("crlf.txt", in: root)) == byteOrderMark + Data("alpha\r\nBETA\r\ngamma\r\n".utf8))
-        #expect(Self.bytes(Self.path("lf.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
+        #expect(Self.bytes(TestSupport.path("crlf.txt", in: root)) == byteOrderMark + Data("alpha\r\nBETA\r\ngamma\r\n".utf8))
+        #expect(Self.bytes(TestSupport.path("lf.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
     }
 
     // MARK: Phase-2 stage failure
@@ -247,8 +241,8 @@ import Testing
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedDirectory.path) }
 
         let hunks: [PatchParser.Hunk] = [
-            .addFile(path: Self.path("a.txt", in: root), contents: "a\n"),
-            .addFile(path: Self.path("b.txt", in: root), contents: "b\n"),
+            .addFile(path: TestSupport.path("a.txt", in: root), contents: "a\n"),
+            .addFile(path: TestSupport.path("b.txt", in: root), contents: "b\n"),
             .addFile(path: lockedDirectory.appendingPathComponent("c.txt").path, contents: "c\n"),
         ]
 
@@ -261,11 +255,11 @@ import Testing
             return
         }
 
-        #expect(!Self.exists(Self.path("a.txt", in: root)))
-        #expect(!Self.exists(Self.path("b.txt", in: root)))
+        #expect(!Self.exists(TestSupport.path("a.txt", in: root)))
+        #expect(!Self.exists(TestSupport.path("b.txt", in: root)))
         #expect(!Self.exists(lockedDirectory.appendingPathComponent("c.txt").path))
-        #expect(Self.temporaryLeftovers(in: root).isEmpty)
-        #expect(Self.temporaryLeftovers(in: lockedDirectory).isEmpty)
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty)
+        #expect(TestSupport.temporaryFileLeftovers(in: lockedDirectory).isEmpty)
     }
 
     // MARK: Phase-2 removal failure
@@ -294,7 +288,7 @@ import Testing
         let (root, pathGuard) = Self.makeFixture()
         let payload = Data("payload\n".utf8)
         let source = try Self.seed(payload, named: "locked-source.txt", in: root)
-        let destination = Self.path("moved-dest.txt", in: root)
+        let destination = TestSupport.path("moved-dest.txt", in: root)
 
         // Lock the source so `.edit` validation and the decode both pass, but
         // the post-commit unlink of the move source is denied.
@@ -323,12 +317,12 @@ import Testing
         try Self.seed(original, named: "before.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("before.txt", in: root), movePath: Self.path("after.txt", in: root), pairs: [])
+            .updateFile(path: TestSupport.path("before.txt", in: root), movePath: TestSupport.path("after.txt", in: root), pairs: [])
         ]
         let outcomes = try Self.apply(hunks, using: pathGuard)
 
-        #expect(!Self.exists(Self.path("before.txt", in: root)))
-        #expect(Self.bytes(Self.path("after.txt", in: root)) == original)
+        #expect(!Self.exists(TestSupport.path("before.txt", in: root)))
+        #expect(Self.bytes(TestSupport.path("after.txt", in: root)) == original)
         let move = try #require(outcomes.first)
         #expect(move.action == .moved)
         #expect(move.appliedPairs == 0)
@@ -341,16 +335,16 @@ import Testing
         try Self.seed(Data("payload\n".utf8), named: "src.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("src.txt", in: root), movePath: Self.path("collide.txt", in: root), pairs: []),
-            .addFile(path: Self.path("collide.txt", in: root), contents: "new\n"),
+            .updateFile(path: TestSupport.path("src.txt", in: root), movePath: TestSupport.path("collide.txt", in: root), pairs: []),
+            .addFile(path: TestSupport.path("collide.txt", in: root), contents: "new\n"),
         ]
         guard case .corrective = Self.failure(PatchEngine.apply(hunks, using: pathGuard)) else {
             Issue.record("expected .corrective for a move-destination/add collision")
             return
         }
         // No write happened: the source is intact and the collision target absent.
-        #expect(Self.exists(Self.path("src.txt", in: root)))
-        #expect(!Self.exists(Self.path("collide.txt", in: root)))
+        #expect(Self.exists(TestSupport.path("src.txt", in: root)))
+        #expect(!Self.exists(TestSupport.path("collide.txt", in: root)))
     }
 
     @Test func twoMovesToSameDestinationAbort() throws {
@@ -359,15 +353,15 @@ import Testing
         try Self.seed(Data("second\n".utf8), named: "two.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("one.txt", in: root), movePath: Self.path("merged.txt", in: root), pairs: []),
-            .updateFile(path: Self.path("two.txt", in: root), movePath: Self.path("merged.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("one.txt", in: root), movePath: TestSupport.path("merged.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("two.txt", in: root), movePath: TestSupport.path("merged.txt", in: root), pairs: []),
         ]
         guard case .corrective = Self.failure(PatchEngine.apply(hunks, using: pathGuard)) else {
             Issue.record("expected .corrective for two moves to the same destination")
             return
         }
-        #expect(Self.exists(Self.path("one.txt", in: root)))
-        #expect(Self.exists(Self.path("two.txt", in: root)))
+        #expect(Self.exists(TestSupport.path("one.txt", in: root)))
+        #expect(Self.exists(TestSupport.path("two.txt", in: root)))
     }
 
     @Test func deleteAndMoveToSamePathAborts() throws {
@@ -376,8 +370,8 @@ import Testing
         try Self.seed(Data("doomed\n".utf8), named: "b.txt", in: root)
 
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("a.txt", in: root), movePath: Self.path("b.txt", in: root), pairs: []),
-            .deleteFile(path: Self.path("b.txt", in: root)),
+            .updateFile(path: TestSupport.path("a.txt", in: root), movePath: TestSupport.path("b.txt", in: root), pairs: []),
+            .deleteFile(path: TestSupport.path("b.txt", in: root)),
         ]
         guard case .corrective = Self.failure(PatchEngine.apply(hunks, using: pathGuard)) else {
             Issue.record("expected .corrective when a move destination is also deleted")
@@ -395,14 +389,14 @@ import Testing
         // A filename swap: each section renames onto the other's path. Distinct
         // final paths, so the patch is legal and content is swapped.
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("alpha.txt", in: root), movePath: Self.path("beta.txt", in: root), pairs: []),
-            .updateFile(path: Self.path("beta.txt", in: root), movePath: Self.path("alpha.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("alpha.txt", in: root), movePath: TestSupport.path("beta.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("beta.txt", in: root), movePath: TestSupport.path("alpha.txt", in: root), pairs: []),
         ]
         _ = try Self.apply(hunks, using: pathGuard)
 
-        #expect(Self.bytes(Self.path("alpha.txt", in: root)) == betaBytes)
-        #expect(Self.bytes(Self.path("beta.txt", in: root)) == alphaBytes)
-        #expect(Self.temporaryLeftovers(in: root).isEmpty)
+        #expect(Self.bytes(TestSupport.path("alpha.txt", in: root)) == betaBytes)
+        #expect(Self.bytes(TestSupport.path("beta.txt", in: root)) == alphaBytes)
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty)
     }
 
     @Test func rotationOfThreeFilesIsAllowed() throws {
@@ -416,16 +410,16 @@ import Testing
 
         // a→b, b→c, c→a: distinct final paths, a legal rotation.
         let hunks: [PatchParser.Hunk] = [
-            .updateFile(path: Self.path("a.txt", in: root), movePath: Self.path("b.txt", in: root), pairs: []),
-            .updateFile(path: Self.path("b.txt", in: root), movePath: Self.path("c.txt", in: root), pairs: []),
-            .updateFile(path: Self.path("c.txt", in: root), movePath: Self.path("a.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("a.txt", in: root), movePath: TestSupport.path("b.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("b.txt", in: root), movePath: TestSupport.path("c.txt", in: root), pairs: []),
+            .updateFile(path: TestSupport.path("c.txt", in: root), movePath: TestSupport.path("a.txt", in: root), pairs: []),
         ]
         _ = try Self.apply(hunks, using: pathGuard)
 
-        #expect(Self.bytes(Self.path("b.txt", in: root)) == aBytes)
-        #expect(Self.bytes(Self.path("c.txt", in: root)) == bBytes)
-        #expect(Self.bytes(Self.path("a.txt", in: root)) == cBytes)
-        #expect(Self.temporaryLeftovers(in: root).isEmpty)
+        #expect(Self.bytes(TestSupport.path("b.txt", in: root)) == aBytes)
+        #expect(Self.bytes(TestSupport.path("c.txt", in: root)) == bBytes)
+        #expect(Self.bytes(TestSupport.path("a.txt", in: root)) == cBytes)
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty)
     }
 
     // MARK: Result helpers

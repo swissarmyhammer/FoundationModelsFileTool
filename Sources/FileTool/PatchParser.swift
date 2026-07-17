@@ -411,8 +411,25 @@ public enum PatchParser {
                 movePath = destination
                 index += 1
             }
+            return parsePairs().flatMap { pairs -> Result<Hunk, ParseFailure> in
+                guard !pairs.isEmpty || movePath != nil else {
+                    return .failure(ParseFailure(message: Messages.updateEmpty, line: headerLine))
+                }
+                return .success(.updateFile(path: path, movePath: movePath, pairs: pairs))
+            }
+        }
+
+        /// Read an Update body's ordered Find/Replace pairs, stopping at the next file-op header or the envelope end.
+        ///
+        /// Blank content lines between pairs are skipped. A `*** Replace:` here
+        /// (no preceding Find), a misplaced `*** Move to:`, a nested
+        /// `*** Begin Patch`, an unknown marker, or a non-blank content line is a
+        /// failure. The terminating header is left unconsumed for the caller.
+        ///
+        /// - Returns: `.success` with the pairs in source order, or `.failure`.
+        private mutating func parsePairs() -> Result<[Pair], ParseFailure> {
             var pairs: [Pair] = []
-            pairLoop: while index < end {
+            while index < end {
                 switch classify(lines[index]) {
                 case .content:
                     guard isBlank(lines[index]) else {
@@ -422,10 +439,7 @@ public enum PatchParser {
                 case .unknownMarker:
                     return .failure(ParseFailure(message: Messages.unknownMarker(lines[index]), line: index + 1))
                 case .marker(.find):
-                    switch parsePair() {
-                    case .success(let pair): pairs.append(pair)
-                    case .failure(let failure): return .failure(failure)
-                    }
+                    if let failure = appendPair(to: &pairs) { return .failure(failure) }
                 case .marker(.replace):
                     return .failure(ParseFailure(message: Messages.replaceWithoutFind, line: index + 1))
                 case .marker(.move):
@@ -433,13 +447,28 @@ public enum PatchParser {
                 case .marker(.begin):
                     return .failure(ParseFailure(message: Messages.nestedBegin, line: index + 1))
                 case .marker(.add), .marker(.update), .marker(.delete), .marker(.end):
-                    break pairLoop
+                    return .success(pairs)
                 }
             }
-            guard !pairs.isEmpty || movePath != nil else {
-                return .failure(ParseFailure(message: Messages.updateEmpty, line: headerLine))
+            return .success(pairs)
+        }
+
+        /// Parse one Find/Replace pair at the current `*** Find:` marker and append it to `pairs`.
+        ///
+        /// Adapts ``parsePair()``'s `Result` to the marker loop in
+        /// ``parsePairs()``, which needs only to know whether the pair parsed —
+        /// keeping the pair-result handling out of that loop's `switch`.
+        ///
+        /// - Parameter pairs: the accumulator the parsed pair is appended to.
+        /// - Returns: the failure that stopped the parse, or `nil` on success.
+        private mutating func appendPair(to pairs: inout [Pair]) -> ParseFailure? {
+            switch parsePair() {
+            case .success(let pair):
+                pairs.append(pair)
+                return nil
+            case .failure(let failure):
+                return failure
             }
-            return .success(.updateFile(path: path, movePath: movePath, pairs: pairs))
         }
 
         /// Parse one Find/Replace pair starting at a `*** Find:` marker, advancing past the Replace body.

@@ -42,27 +42,6 @@ import Testing
         try Data(contentsOf: URL(fileURLWithPath: path))
     }
 
-    /// The POSIX permission bits (`mode & 0o777`) of a path.
-    ///
-    /// - Parameter path: the absolute path to inspect.
-    /// - Returns: the permission bits, or `nil` when the attributes are unreadable.
-    private static func permissionBits(_ path: String) -> Int? {
-        (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? nil
-    }
-
-    /// The names of directory entries whose name marks them as a leftover temporary file.
-    ///
-    /// Scans `directory` for entries whose name contains the `.tmp.` infix
-    /// ``AtomicWriter`` uses, so a test can assert the atomic write left nothing
-    /// behind on a failure.
-    ///
-    /// - Parameter directory: the directory URL to scan.
-    /// - Returns: the names of any temporary-file leftovers.
-    private static func temporaryFileLeftovers(in directory: URL) -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
-        return names.filter { $0.contains(".tmp.") }
-    }
-
     // MARK: New and overwrite
 
     @Test func writesANewFile() async throws {
@@ -155,7 +134,7 @@ import Testing
         let message = try #require(output.correctiveValue)
 
         #expect(!message.isEmpty)
-        #expect(Self.temporaryFileLeftovers(in: root).isEmpty, "rename failure must remove the temporary file")
+        #expect(TestSupport.temporaryFileLeftovers(in: root).isEmpty, "rename failure must remove the temporary file")
         var isDirectory: ObjCBool = false
         #expect(FileManager.default.fileExists(atPath: directoryTarget.path, isDirectory: &isDirectory))
         #expect(isDirectory.boolValue, "the directory target must be untouched")
@@ -174,7 +153,7 @@ import Testing
         let message = try #require(output.correctiveValue)
 
         #expect(!message.isEmpty)
-        #expect(Self.temporaryFileLeftovers(in: readOnlyDirectory).isEmpty, "write failure must remove the temporary file")
+        #expect(TestSupport.temporaryFileLeftovers(in: readOnlyDirectory).isEmpty, "write failure must remove the temporary file")
         #expect(!FileManager.default.fileExists(atPath: target.path), "a failed write must not create the target")
     }
 
@@ -219,7 +198,7 @@ import Testing
         let output = try await Self.makeOperation(filePath: url.path, content: "#!/bin/sh\necho new\n").execute(in: context)
         _ = try #require(output.resultValue)
 
-        #expect(Self.permissionBits(url.path) == 0o755, "overwriting a 0755 file must keep it 0755")
+        #expect(TestSupport.permissionBits(url.path) == 0o755, "overwriting a 0755 file must keep it 0755")
     }
 
     // MARK: Envelope fields

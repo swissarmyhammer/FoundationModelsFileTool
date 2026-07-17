@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Shared scaffolding for the `FileTool` test target.
 ///
@@ -45,5 +46,45 @@ enum TestSupport {
         let rootPath = root.standardizedFileURL.path
         let candidatePath = candidate.standardizedFileURL.path
         return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+    }
+
+    /// The absolute path of `name` directly under `root`, without creating it.
+    ///
+    /// - Parameters:
+    ///   - name: the file name within `root`.
+    ///   - root: the directory to resolve `name` against.
+    /// - Returns: the resolved absolute path.
+    static func path(_ name: String, in root: URL) -> String {
+        root.appendingPathComponent(name, isDirectory: false).path
+    }
+
+    /// The POSIX permission bits (`mode & 0o777`) of a path.
+    ///
+    /// - Parameter path: the absolute path to inspect.
+    /// - Returns: the permission bits, or `nil` when the attributes are unreadable.
+    static func permissionBits(_ path: String) -> Int? {
+        (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? nil
+    }
+
+    /// The names of directory entries whose name marks them as a leftover temporary file.
+    ///
+    /// Scans `directory` for entries whose name contains the `.tmp.` infix
+    /// ``AtomicWriter`` uses, so a test can assert an atomic write or a staged
+    /// multi-file commit left nothing behind on a failure.
+    ///
+    /// - Parameter directory: the directory URL to scan.
+    /// - Returns: the names of any temporary-file leftovers.
+    static func temporaryFileLeftovers(in directory: URL) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        return names.filter { $0.contains(".tmp.") }
+    }
+
+    /// Build a `GeneratedContent` payload from ordered key/value entries.
+    ///
+    /// - Parameter entries: the payload's properties, in order; a later
+    ///   duplicate key wins.
+    /// - Returns: the assembled structure payload.
+    static func payload(_ entries: [(String, any ConvertibleToGeneratedContent)]) -> GeneratedContent {
+        GeneratedContent(properties: entries, uniquingKeysWith: { _, new in new })
     }
 }

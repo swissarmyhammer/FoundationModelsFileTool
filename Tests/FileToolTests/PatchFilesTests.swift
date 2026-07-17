@@ -29,14 +29,6 @@ import Testing
         try PatchFiles(GeneratedContent(properties: [("patch", patch)], uniquingKeysWith: { _, new in new }))
     }
 
-    /// Build a `GeneratedContent` payload from ordered key/value entries.
-    ///
-    /// - Parameter entries: the payload's properties, in order.
-    /// - Returns: the assembled structure payload.
-    private static func payload(_ entries: [(String, any ConvertibleToGeneratedContent)]) -> GeneratedContent {
-        GeneratedContent(properties: entries, uniquingKeysWith: { _, new in new })
-    }
-
     /// Wrap a section body in the envelope markers.
     ///
     /// - Parameter body: the file-section text between the markers.
@@ -60,19 +52,19 @@ import Testing
         return (FileContext(root: root), root)
     }
 
-    /// The absolute path of `name` under `root`.
-    private static func path(_ name: String, in root: URL) -> String {
-        root.appendingPathComponent(name, isDirectory: false).path
-    }
-
     /// The raw on-disk bytes of a file, or `nil` when it does not exist.
     private static func bytes(_ path: String) -> Data? {
         try? Data(contentsOf: URL(fileURLWithPath: path))
     }
 
     /// The per-file result whose reported path ends with `suffix`.
+    ///
+    /// - Parameters:
+    ///   - files: the per-file results to search.
+    ///   - suffix: the path suffix identifying the wanted result.
+    /// - Returns: the first matching result, or `nil` when none matches.
     private static func file(
-        _ files: [PatchFileResult],
+        in files: [PatchFileResult],
         endingWith suffix: String
     ) -> PatchFileResult? {
         files.first { $0.path.hasSuffix(suffix) }
@@ -87,16 +79,16 @@ import Testing
             ("source.txt", "keep me\n"),
         ])
         let body = """
-            *** Add File: \(Self.path("added.txt", in: root))
+            *** Add File: \(TestSupport.path("added.txt", in: root))
             +added
-            *** Update File: \(Self.path("update.txt", in: root))
+            *** Update File: \(TestSupport.path("update.txt", in: root))
             *** Find:
             two
             *** Replace:
             TWO
-            *** Delete File: \(Self.path("delete.txt", in: root))
-            *** Update File: \(Self.path("source.txt", in: root))
-            *** Move to: \(Self.path("dest.txt", in: root))
+            *** Delete File: \(TestSupport.path("delete.txt", in: root))
+            *** Update File: \(TestSupport.path("source.txt", in: root))
+            *** Move to: \(TestSupport.path("dest.txt", in: root))
             """
         let output = try await Self.makeOperation(patch: Self.envelope(body)).execute(in: context)
         let result = try #require(output.resultValue)
@@ -104,29 +96,29 @@ import Testing
         #expect(result.status == "applied")
         #expect(result.files.count == 4)
 
-        let add = try #require(Self.file(result.files, endingWith: "added.txt"))
+        let add = try #require(Self.file(in: result.files, endingWith: "added.txt"))
         #expect(add.action == "added")
         #expect(add.applied == 0)
         #expect(add.bytesWritten == Data("added\n".utf8).count)
         #expect(add.hash == Hashline.wholeFileHash(bytes: Data("added\n".utf8)))
-        #expect(Self.bytes(Self.path("added.txt", in: root)) == Data("added\n".utf8))
+        #expect(Self.bytes(TestSupport.path("added.txt", in: root)) == Data("added\n".utf8))
 
-        let update = try #require(Self.file(result.files, endingWith: "update.txt"))
+        let update = try #require(Self.file(in: result.files, endingWith: "update.txt"))
         #expect(update.action == "modified")
         #expect(update.applied == 1)
-        #expect(Self.bytes(Self.path("update.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
+        #expect(Self.bytes(TestSupport.path("update.txt", in: root)) == Data("one\nTWO\nthree\n".utf8))
 
-        let delete = try #require(Self.file(result.files, endingWith: "delete.txt"))
+        let delete = try #require(Self.file(in: result.files, endingWith: "delete.txt"))
         #expect(delete.action == "deleted")
         #expect(delete.bytesWritten == nil)
         #expect(delete.hash == nil)
-        #expect(Self.bytes(Self.path("delete.txt", in: root)) == nil)
+        #expect(Self.bytes(TestSupport.path("delete.txt", in: root)) == nil)
 
-        let move = try #require(Self.file(result.files, endingWith: "source.txt"))
+        let move = try #require(Self.file(in: result.files, endingWith: "source.txt"))
         #expect(move.action == "moved")
-        #expect(move.movedTo == Self.path("dest.txt", in: root))
-        #expect(Self.bytes(Self.path("dest.txt", in: root)) == Data("keep me\n".utf8))
-        #expect(Self.bytes(Self.path("source.txt", in: root)) == nil)
+        #expect(move.movedTo == TestSupport.path("dest.txt", in: root))
+        #expect(Self.bytes(TestSupport.path("dest.txt", in: root)) == Data("keep me\n".utf8))
+        #expect(Self.bytes(TestSupport.path("source.txt", in: root)) == nil)
     }
 
     // MARK: Dispatch through the fused tool
@@ -134,30 +126,30 @@ import Testing
     @Test func dispatchesPatchFilesThroughTypedOutput() async throws {
         let (context, root) = Self.makeContext()
         let tool = try FileTool.make(context: context)
-        let body = "*** Add File: \(Self.path("new.txt", in: root))\n+hello"
+        let body = "*** Add File: \(TestSupport.path("new.txt", in: root))\n+hello"
 
-        let json = try await tool.call(arguments: Self.payload([("op", "patch files"), ("patch", Self.envelope(body))]))
+        let json = try await tool.call(arguments: TestSupport.payload([("op", "patch files"), ("patch", Self.envelope(body))]))
 
         #expect(json.contains("\"status\":\"applied\""))
         #expect(json.contains("\"action\":\"added\""))
-        #expect(Self.bytes(Self.path("new.txt", in: root)) == Data("hello\n".utf8))
+        #expect(Self.bytes(TestSupport.path("new.txt", in: root)) == Data("hello\n".utf8))
     }
 
     // MARK: Op-inference from the bare `patch` key
 
     @Test func infersPatchFilesFromPatchKey() {
-        #expect(FileTool.inferOperation(from: Self.payload([("patch", "*** Begin Patch")])) == "patch files")
+        #expect(FileTool.inferOperation(from: TestSupport.payload([("patch", "*** Begin Patch")])) == "patch files")
     }
 
     @Test func barePatchPayloadDispatchesAndApplies() async throws {
         let (context, root) = Self.makeContext()
         let tool = try FileTool.make(context: context)
-        let body = "*** Add File: \(Self.path("inferred.txt", in: root))\n+inferred"
+        let body = "*** Add File: \(TestSupport.path("inferred.txt", in: root))\n+inferred"
 
-        let json = try await tool.call(arguments: Self.payload([("patch", Self.envelope(body))]))
+        let json = try await tool.call(arguments: TestSupport.payload([("patch", Self.envelope(body))]))
 
         #expect(json.contains("\"status\":\"applied\""))
-        #expect(Self.bytes(Self.path("inferred.txt", in: root)) == Data("inferred\n".utf8))
+        #expect(Self.bytes(TestSupport.path("inferred.txt", in: root)) == Data("inferred\n".utf8))
     }
 
     // MARK: Malformed envelope
@@ -165,13 +157,13 @@ import Testing
     @Test func malformedEnvelopeIsCorrectiveNamingTheLineAndLeavesFilesUntouched() async throws {
         let (context, root) = Self.makeContext(seeding: [("keep.txt", "unchanged\n")])
         // A `*** Begin Patch` with no `*** End Patch`.
-        let malformed = "*** Begin Patch\n*** Add File: \(Self.path("nope.txt", in: root))\n+x\n"
+        let malformed = "*** Begin Patch\n*** Add File: \(TestSupport.path("nope.txt", in: root))\n+x\n"
         let output = try await Self.makeOperation(patch: malformed).execute(in: context)
         let message = try #require(output.correctiveValue)
 
         #expect(message.contains("line"))
-        #expect(Self.bytes(Self.path("keep.txt", in: root)) == Data("unchanged\n".utf8))
-        #expect(Self.bytes(Self.path("nope.txt", in: root)) == nil)
+        #expect(Self.bytes(TestSupport.path("keep.txt", in: root)) == Data("unchanged\n".utf8))
+        #expect(Self.bytes(TestSupport.path("nope.txt", in: root)) == nil)
     }
 
     // MARK: Unresolved update pair (structured, byte-identical)
@@ -179,7 +171,7 @@ import Testing
     @Test func nearMissUpdateReportsPathAndDiffAndCommitsNothing() async throws {
         let original = "the quick brown fox\n"
         let (context, root) = Self.makeContext(seeding: [("prose.txt", original)])
-        let target = Self.path("prose.txt", in: root)
+        let target = TestSupport.path("prose.txt", in: root)
         let body = """
             *** Update File: \(target)
             *** Find:
@@ -205,7 +197,7 @@ import Testing
     @Test func ambiguousUpdateReportsCandidatesAndCommitsNothing() async throws {
         let original = "x\nx\n"
         let (context, root) = Self.makeContext(seeding: [("dup.txt", original)])
-        let target = Self.path("dup.txt", in: root)
+        let target = TestSupport.path("dup.txt", in: root)
         let body = """
             *** Update File: \(target)
             *** Find:
@@ -227,10 +219,10 @@ import Testing
     @Test func readOnlyToolRejectsPatchWithCorrectiveAndDoesNotWrite() async throws {
         let (context, root) = Self.makeContext()
         let tool = try FileTool.makeReadOnly(context: context)
-        let target = Self.path("blocked.txt", in: root)
+        let target = TestSupport.path("blocked.txt", in: root)
         let body = "*** Add File: \(target)\n+nope"
 
-        let message = try await tool.call(arguments: Self.payload([("op", "patch files"), ("patch", Self.envelope(body))]))
+        let message = try await tool.call(arguments: TestSupport.payload([("op", "patch files"), ("patch", Self.envelope(body))]))
 
         #expect(message.contains("not available in read-only mode"))
         #expect(Self.bytes(target) == nil)
@@ -241,10 +233,10 @@ import Testing
     @Test func encodedResultCarriesTheExpectedFieldNames() async throws {
         let (context, root) = Self.makeContext(seeding: [("src.txt", "hi\n")])
         let body = """
-            *** Add File: \(Self.path("made.txt", in: root))
+            *** Add File: \(TestSupport.path("made.txt", in: root))
             +made
-            *** Update File: \(Self.path("src.txt", in: root))
-            *** Move to: \(Self.path("moved.txt", in: root))
+            *** Update File: \(TestSupport.path("src.txt", in: root))
+            *** Move to: \(TestSupport.path("moved.txt", in: root))
             """
         let output = try await Self.makeOperation(patch: Self.envelope(body)).execute(in: context)
         let result = try #require(output.resultValue)
