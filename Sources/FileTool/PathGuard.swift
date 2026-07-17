@@ -435,7 +435,7 @@ public struct PathGuard: Sendable {
     ///   ``PathViolation``.
     private func checkEditPermission(_ path: String) -> Result<Void, PathViolation> {
         if !fileExists(path) {
-            return .failure(PathViolation("Cannot edit non-existent file: \(path)"))
+            return .failure(Self.nonexistentFileViolation(operation: "edit", path: path))
         }
         if Self.isReadOnly(path) {
             return .failure(PathViolation("File is read-only and cannot be edited: \(path)"))
@@ -471,7 +471,7 @@ public struct PathGuard: Sendable {
     ///   ``PathViolation``.
     private func checkDeletePermission(_ path: String) -> Result<Void, PathViolation> {
         guard fileExists(path) else {
-            return .failure(PathViolation("Cannot delete non-existent file: \(path)"))
+            return .failure(Self.nonexistentFileViolation(operation: "delete", path: path))
         }
         guard let mode = Self.fileMode(path), (mode & S_IFMT) == S_IFREG else {
             return .failure(PathViolation("Cannot delete non-regular file: \(path)"))
@@ -623,6 +623,21 @@ public struct PathGuard: Sendable {
         case .failed:
             return .failure(PathViolation(failureMessage()))
         }
+    }
+
+    /// The corrective violation rejecting an operation on a nonexistent file.
+    ///
+    /// Both ``checkEditPermission(_:)`` and ``checkDeletePermission(_:)`` reject a
+    /// missing file with the same wording save for the operation verb, so the
+    /// exact phrasing lives in one place; the offending path is appended after the
+    /// colon.
+    ///
+    /// - Parameters:
+    ///   - operation: the verb naming the attempted operation ("edit", "delete").
+    ///   - path: the offending path.
+    /// - Returns: the corrective ``PathViolation``.
+    private static func nonexistentFileViolation(operation: String, path: String) -> PathViolation {
+        PathViolation("Cannot \(operation) non-existent file: \(path)")
     }
 
     /// An "empty path" violation when a path is blank after trimming, else `nil`.

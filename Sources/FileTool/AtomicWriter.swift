@@ -266,12 +266,25 @@ public enum AtomicWriter {
     ///   not valid UTF-8.
     public static func decode(_ data: Data) -> DecodedText? {
         if data.starts(with: utf8ByteOrderMark) {
-            let body = data.dropFirst(utf8ByteOrderMark.count)
-            guard let text = String(data: body, encoding: .utf8) else { return nil }
-            return DecodedText(encoding: .utf8WithByteOrderMark, text: text)
+            return decodeAsUTF8(from: data.dropFirst(utf8ByteOrderMark.count), encoding: .utf8WithByteOrderMark)
         }
+        return decodeAsUTF8(from: data, encoding: .utf8)
+    }
+
+    /// Decode UTF-8 bytes, tagging the result with the encoding they came from.
+    ///
+    /// The guard-decode-return pattern shared by both branches of ``decode(_:)``:
+    /// bytes that are not valid UTF-8 (a binary file) yield `nil` rather than a
+    /// lossy decode.
+    ///
+    /// - Parameters:
+    ///   - data: the UTF-8 bytes to decode, with any byte-order mark already stripped.
+    ///   - encoding: the encoding to pair the decoded text with.
+    /// - Returns: the decoded text paired with `encoding`, or `nil` when the bytes
+    ///   are not valid UTF-8.
+    private static func decodeAsUTF8(from data: Data, encoding: TextEncoding) -> DecodedText? {
         guard let text = String(data: data, encoding: .utf8) else { return nil }
-        return DecodedText(encoding: .utf8, text: text)
+        return DecodedText(encoding: encoding, text: text)
     }
 
     /// Encode `text` as `encoding`, re-applying a byte-order mark when required.

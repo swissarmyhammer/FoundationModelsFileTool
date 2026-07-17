@@ -6,6 +6,17 @@ comments:
   id: 01kxqjd4wf88twekvyb7bebjhs
   text: 'Implemented TDD. PathGuard: added FileOperation.delete + checkDeletePermission (existing regular file, parent dir writable via parent mode & 0o222; messages "Cannot delete non-existent file:", "Cannot delete non-regular file:", "Parent directory is not writable:"), wired into checkPermission switch. AtomicWriter: added StagedWrite struct (temporaryURL/destinationURL/permissionBits) with commit() (rename) and idempotent non-throwing discard() (unlink); added static stage(_:to:) that writes sibling temp + applies dest permission bits without renaming, cleaning up temp on failure; refactored write(_:to:) to stage + commit (discard-on-commit-failure) so there is one temp+rename impl. Behavior-preserving. Tests added to PathGuardTests (delete happy/nonexistent/directory/read-only-parent) and AtomicWriterTests (stage/commit/discard lifecycle, two-file independent commit, discard-after-commit no-op, permission preservation, temp cleanup on failed stage). Filtered: 48 tests green across both suites. Full `swift test` exits 0. Did not touch Package.resolved. Task stays in doing pending review.'
   timestamp: 2026-07-17T08:17:06.959945+00:00
+- actor: claude-code
+  id: 01kxqk8hh6w9n06k9yksv2yqwm
+  text: |-
+    Worked the 2 review findings (both duplication in production source; line numbers in findings were stale from the original implementation).
+
+    1. AtomicWriter.swift: the two if-else branches of `decode(_:)` differed only by the data variable and the encoding. Extracted `private static func decodeAsUTF8(from data: Data, encoding: TextEncoding) -> DecodedText?` (the guard-decode-return pattern) and call it from both branches — BOM branch passes `data.dropFirst(utf8ByteOrderMark.count)` with `.utf8WithByteOrderMark`, the fallthrough passes `data` with `.utf8`. Behavior byte-identical.
+
+    2. PathGuard.swift: `checkEditPermission` and `checkDeletePermission` built the same "Cannot <op> non-existent file: <path>" message. Extracted `private static func nonexistentFileViolation(operation:path:)` (placed with the other static violation constructors) and call it from both with operation "edit"/"delete". Exact strings unchanged.
+
+    Both refactors behavior-preserving; existing tests are the regression guard (decode round-trip cases; PathGuard `.contains("non-existent")` for both edit and delete). Filtered `swift test --filter "PathGuardTests|AtomicWriterTests"`: 48 tests, 2 suites, green. Full `swift test`: 317 tests/20 suites + 26 tests/7 suites, exit 0 (only warning is the pre-existing mlx-swift bundle warning, unrelated). Both findings flipped to [x]. Task left in doing for review. Package.resolved untouched.
+  timestamp: 2026-07-17T08:32:04.646015+00:00
 position_column: doing
 position_ordinal: '80'
 title: 'Patch substrate: PathGuard `.delete` access kind + AtomicWriter staged multi-file commit'
@@ -46,3 +57,8 @@ A move/rename needs no new kind: the caller validates source with `.delete` and 
 
 ## Workflow
 - Use `/tdd` — write failing tests first, then implement to make them pass.
+
+## Review Findings (2026-07-17 03:19)
+
+- [x] `Sources/FileTool/AtomicWriter.swift:260` — Near-verbatim code block repeats at line 263 — identical pattern differing only by a data variable and an encoding parameter. This is one function with two arguments, not two implementations. Extract a private helper function `decodeAsUTF8(from data: Data, encoding: TextEncoding) -> DecodedText?` that encapsulates the guard-decode-return pattern, then call it from both branches of the if-else.
+- [x] `Sources/FileTool/PathGuard.swift:506` — Near-verbatim error message repeats at line 541 — identical pattern differing only by operation name (edit vs delete). Both check file existence and return a nearly identical failure message. Extract a private helper function that constructs the 'cannot-operate-on-nonexistent-file' violation message parameterized by operation name, then call it from both `checkEditPermission` and `checkDeletePermission`.
