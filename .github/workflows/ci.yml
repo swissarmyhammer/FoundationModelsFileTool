@@ -36,18 +36,20 @@ jobs:
         run: swift --version
 
       # sourcekit-lsp's background indexer eagerly prepares every target in
-      # the *whole* resolved package graph — including dev-only targets
-      # (e.g. a dependency-of-a-dependency's own Benchmarks target) that
-      # nothing in this package ever builds or imports. With `main`-branch
-      # dependencies and no committed Package.resolved, that fans out into a
-      # deeply recursive `.build/index-build/checkouts/.../checkouts/...`
-      # resolve-and-build chain that has been observed pinning a background
-      # `swift-build --experimental-prepare-for-indexing` process for well
-      # over an hour on this runner. The real-LSP integration tests only need
-      # on-demand, per-file diagnostics (see `DiagnosticsProbe.awaitDiagnostics`),
-      # never proactive whole-graph indexing, so this is safe to turn off for
-      # CI. Scoped to the CI workspace only (not committed) so local
-      # interactive editors keep normal background indexing.
+      # the *whole* resolved package graph — including dev-only targets (e.g.
+      # a dependency-of-a-dependency's own Benchmarks target) that nothing in
+      # this package ever builds or imports, which can fan out into a deeply
+      # recursive `.build/index-build/checkouts/.../checkouts/...`
+      # resolve-and-build chain. This was suspected (not confirmed — the
+      # process observed doing this was on an unrelated machine, not this
+      # runner) as a contributor to the Test step hanging; local timing later
+      # showed the real-LSP suite itself is not the bottleneck, so this is
+      # kept as a cheap, low-risk precaution rather than the fix. The real-LSP
+      # integration tests only need on-demand, per-file diagnostics (see
+      # `DiagnosticsProbe.awaitDiagnostics`), never proactive whole-graph
+      # indexing, so disabling it costs nothing. Scoped to the CI workspace
+      # only (not committed) so local interactive editors keep normal
+      # background indexing.
       - name: Disable sourcekit-lsp background indexing for CI
         run: |
           mkdir -p .sourcekit-lsp
@@ -69,5 +71,26 @@ jobs:
       - name: Assert sourcekit-lsp is available
         run: xcrun --find sourcekit-lsp
 
-      - name: Test
-        run: swift test
+      # Split from the integration tier below on purpose: the hermetic unit
+      # tier (~1,300 tests, mocked resolvers, no subprocess) reliably finishes
+      # in well under a second locally and in CI alike, so it gets no special
+      # timeout — a hang here would be a real, novel bug worth the full job
+      # budget to surface.
+      - name: Unit tests (FileToolTests)
+        run: swift test --filter FileToolTests
+
+      # A run on this exact CI runner previously sat completely silent for
+      # 45 minutes on this step (no "Test run started" line was ever printed
+      # for the FileToolIntegrationTests bundle) before the job timeout killed
+      # it — yet the identical suite (real sourcekit-lsp, all 7 suites, 26
+      # tests) finishes in ~16 seconds locally. Whatever hangs is specific to
+      # this runner's environment and happens before any test framework
+      # output is produced, so a combined `swift test` gives no signal about
+      # where. Isolating this tier into its own step with a short timeout and
+      # `-v` means a repeat hang fails in ~2 minutes instead of 45, and the
+      # verbose log's last line pinpoints the exact suite/test (or confirms it
+      # never even starts) — the evidence needed to root-cause this on the
+      # runner itself.
+      - name: Integration tests (FileToolIntegrationTests)
+        timeout-minutes: 2
+        run: swift test --filter FileToolIntegrationTests -v
