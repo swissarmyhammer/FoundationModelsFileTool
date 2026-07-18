@@ -83,14 +83,34 @@ jobs:
       # 45 minutes on this step (no "Test run started" line was ever printed
       # for the FileToolIntegrationTests bundle) before the job timeout killed
       # it — yet the identical suite (real sourcekit-lsp, all 7 suites, 26
-      # tests) finishes in ~16 seconds locally. Whatever hangs is specific to
-      # this runner's environment and happens before any test framework
-      # output is produced, so a combined `swift test` gives no signal about
-      # where. Isolating this tier into its own step with a short timeout and
-      # `-v` means a repeat hang fails in ~2 minutes instead of 45, and the
-      # verbose log's last line pinpoints the exact suite/test (or confirms it
-      # never even starts) — the evidence needed to root-cause this on the
-      # runner itself.
+      # tests) finishes in ~16 seconds locally. Isolating this tier with a
+      # short timeout and `-v` (a prior change) reproduced the identical
+      # symptom bounded to 2 minutes instead of 45, but still gave zero bytes
+      # of output — proving the hang happens before the test harness prints
+      # anything, not that `-v` lacks the detail. Two remaining unknowns: (a)
+      # `-v` output could be sitting in a fully-buffered stdio pipe that's
+      # never flushed because the process gets killed rather than exiting
+      # cleanly, and (b) the process might be genuinely blocked (codesign
+      # verification, sourcekit-lsp subprocess launch, resource contention)
+      # before any print happens. `script -q /dev/null` attaches a pseudo-tty
+      # so libc stdio line-buffers instead of block-buffers, ruling out (a).
+      # The background loop samples the actual test binary's call stack every
+      # ~10s while it's alive, which answers (b) directly: a repeat hang now
+      # prints exactly which frame it's stuck in instead of just confirming
+      # silence again.
       - name: Integration tests (FileToolIntegrationTests)
         timeout-minutes: 2
-        run: swift test --filter FileToolIntegrationTests -v
+        run: |
+          script -q /dev/null swift test --filter FileToolIntegrationTests -v &
+          DRIVER_PID=$!
+          for i in $(seq 1 10); do
+            sleep 10
+            kill -0 "$DRIVER_PID" 2>/dev/null || break
+            echo "::group::diagnostic sample at ~$((i * 10))s"
+            ps -axo pid,ppid,pcpu,etime,command | grep -iE "FileToolIntegrationTests|swiftpm-testing" | grep -v grep || echo "no matching test process found"
+            for PID in $(pgrep -f "FileToolIntegrationTests|swiftpm-testing"); do
+              /usr/bin/sample "$PID" 1 -mayDie 2>&1 || true
+            done
+            echo "::endgroup::"
+          done
+          wait "$DRIVER_PID"
